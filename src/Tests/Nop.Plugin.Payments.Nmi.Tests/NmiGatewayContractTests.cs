@@ -56,20 +56,26 @@ public class NmiGatewayContractTests
     }
 
     [Fact]
-    public async Task CredentialValidationUsesQueryApiAndRecognisesRejectedKeys()
+    public async Task CredentialValidationProbesPaymentApiWithoutMovingMoneyAndRecognisesRejectedKeys()
     {
         var server = new MockNmiHttpServer();
         var client = Client(server);
 
-        var accepted = await client.ValidateCredentialsAsync(Settings());
-        var rejected = await client.ValidateCredentialsAsync(Settings("rejected-key"));
+        var accepted = await client.CheckCredentialsAsync(Settings());
+        var rejected = await client.CheckCredentialsAsync(Settings("rejected-key"));
+        var unreachable = await client.CheckCredentialsAsync(Settings("unreachable-key"));
 
-        Assert.True(accepted);
-        Assert.False(rejected);
+        Assert.True(accepted.Accepted);
+        Assert.Contains("Invalid Transaction ID", accepted.Detail);
+        Assert.False(rejected.Accepted);
+        Assert.Contains("Authentication Failed", rejected.Detail);
+        Assert.False(unreachable.Accepted);
+        Assert.Contains("HTTP_503", unreachable.Detail);
         Assert.All(server.Requests, request =>
         {
-            Assert.Equal("/api/query.php", request.Path);
-            Assert.Contains("result_limit=1", request.Body);
+            Assert.Equal("/api/transact.php", request.Path);
+            Assert.Contains("type=void", request.Body);
+            Assert.Contains("transactionid=0", request.Body);
         });
         Assert.Contains("security_key=contract-private-key", server.Requests.First().Body);
     }
@@ -125,6 +131,18 @@ public class NmiGatewayContractTests
 
             fields.TryGetValue("transactionid", out var transactionId);
             var type = fields["type"];
+            if (transactionId == "0")
+            {
+                return fields["security_key"] switch
+                {
+                    "contract-private-key" => Text(HttpStatusCode.OK,
+                        "response=3&responsetext=Invalid+Transaction+ID+%2F+Object+ID+specified%3A++REFID%3A1&authcode=&transactionid=&type=void&response_code=300"),
+                    "unreachable-key" => Text(HttpStatusCode.ServiceUnavailable, "Service Unavailable"),
+                    _ => Text(HttpStatusCode.OK,
+                        "response=3&responsetext=Authentication+Failed&authcode=&transactionid=&type=void&response_code=300")
+                };
+            }
+
             return transactionId switch
             {
                 "declined" => Text(HttpStatusCode.OK,

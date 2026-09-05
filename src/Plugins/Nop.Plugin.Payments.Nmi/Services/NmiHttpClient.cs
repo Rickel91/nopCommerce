@@ -78,46 +78,30 @@ public partial class NmiHttpClient
 
     /// <summary>
     /// Same as <see cref="ValidateCredentialsAsync"/> but returns a diagnostic detail suitable for logging.
+    /// The check sends a void for a transaction id that cannot exist. It never moves money and works for every
+    /// account type, including NMI's public demo account, which is barred from the Query API. The gateway answers
+    /// "Authentication Failed" for a bad key and "Invalid Transaction ID" (or similar) for an accepted one.
     /// </summary>
     public async Task<NmiCredentialCheckResult> CheckCredentialsAsync(NmiSettings settings, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        var requestUri = BuildRequestUri(GetBaseUri(settings), NmiDefaults.QueryApiPath);
-        using var message = new HttpRequestMessage(HttpMethod.Post, requestUri)
+        var result = await SendTransactionAsync(settings, new[]
         {
-            Content = CreateFormContent(settings, new[] { new KeyValuePair<string, string>("result_limit", "1") })
-        };
+            new KeyValuePair<string, string>("type", NmiTransactionTypes.Void),
+            new KeyValuePair<string, string>("transactionid", "0")
+        }, cancellationToken);
 
-        var stopwatch = Stopwatch.StartNew();
-        try
+        if (result.IsAmbiguous || !result.IsSuccess)
         {
-            using var response = await _httpClient.SendAsync(message, cancellationToken);
-            var statusCode = (int)response.StatusCode;
-            if (!response.IsSuccessStatusCode)
-                return new(false, $"http_status={statusCode}", statusCode, stopwatch.ElapsedMilliseconds);
-
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            if (!body.Contains("<nm_response", StringComparison.OrdinalIgnoreCase))
-                return new(false, "unexpected_response", statusCode, stopwatch.ElapsedMilliseconds);
-
-            var errorStart = body.IndexOf("<error_response>", StringComparison.OrdinalIgnoreCase);
-            if (errorStart < 0)
-                return new(true, "accepted", statusCode, stopwatch.ElapsedMilliseconds);
-
-            var errorEnd = body.IndexOf("</error_response>", errorStart, StringComparison.OrdinalIgnoreCase);
-            var detail = errorEnd > errorStart
-                ? body[(errorStart + "<error_response>".Length)..errorEnd].Trim()
-                : "error_response";
-            return new(false, $"gateway_error={Truncate(detail, 120)}", statusCode, stopwatch.ElapsedMilliseconds);
+            var reason = result.Error?.ErrorCode ?? $"HTTP_{result.StatusCode}";
+            return new(false, $"gateway_unreachable={reason}", result.StatusCode, result.ElapsedMilliseconds);
         }
-        catch (HttpRequestException exception)
-        {
-            return new(false, $"transport_error={exception.GetType().Name}", 0, stopwatch.ElapsedMilliseconds);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            return new(false, "timeout", 0, stopwatch.ElapsedMilliseconds);
-        }
+
+        var response = result.Value;
+        var text = Truncate(response.ResponseText ?? "none", 120);
+        return response.IsAuthenticationFailure
+            ? new(false, $"gateway_error={text}", result.StatusCode, result.ElapsedMilliseconds)
+            : new(true, $"accepted; probe_response={text}", result.StatusCode, result.ElapsedMilliseconds);
     }
 
     #endregion
