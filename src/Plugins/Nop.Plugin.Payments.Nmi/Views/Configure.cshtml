@@ -1,0 +1,152 @@
+@model Nop.Plugin.Payments.Nmi.Models.ConfigurationModel
+@{
+    Layout = "_ConfigurePlugin";
+}
+
+@await Component.InvokeAsync(typeof(StoreScopeConfigurationViewComponent))
+
+<form asp-controller="PaymentNmi" asp-action="Configure" method="post">
+    <div class="cards-group">
+        <div class="card card-default">
+            <div class="card-body">
+                <p>
+                    Configure store-scoped NMI credentials and transaction behavior. Card data is collected by Collect.js inside
+                    gateway-hosted fields and charged through the Payment API (<code>transact.php</code>). Secret values are
+                    encrypted and are never displayed after saving.
+                </p>
+                <p>
+                    Webhook endpoint for the NMI merchant portal (<strong>Settings &gt; Webhooks</strong>):
+                    <code>@Model.WebhookUrl</code>
+                </p>
+
+                <div class="form-group row">
+                    <div class="col-md-3">
+                        <nop-override-store-checkbox asp-for="UseSandbox_OverrideForStore" asp-input="UseSandbox" asp-store-scope="@Model.ActiveStoreScopeConfiguration" />
+                        <nop-label asp-for="UseSandbox" />
+                    </div>
+                    <div class="col-md-9">
+                        <nop-editor asp-for="UseSandbox" />
+                        <span asp-validation-for="UseSandbox"></span>
+                    </div>
+                </div>
+                <div class="form-group row">
+                    <div class="col-md-3">
+                        <nop-override-store-checkbox asp-for="GatewayHost_OverrideForStore" asp-input="GatewayHost" asp-store-scope="@Model.ActiveStoreScopeConfiguration" />
+                        <nop-label asp-for="GatewayHost" />
+                    </div>
+                    <div class="col-md-9">
+                        <nop-editor asp-for="GatewayHost" />
+                        <span asp-validation-for="GatewayHost"></span>
+                    </div>
+                </div>
+                <div class="form-group row">
+                    <div class="col-md-3">
+                        <nop-override-store-checkbox asp-for="PublicTokenizationKey_OverrideForStore" asp-input="PublicTokenizationKey" asp-store-scope="@Model.ActiveStoreScopeConfiguration" />
+                        <nop-label asp-for="PublicTokenizationKey" />
+                    </div>
+                    <div class="col-md-9">
+                        <nop-editor asp-for="PublicTokenizationKey" />
+                        <span asp-validation-for="PublicTokenizationKey"></span>
+                    </div>
+                </div>
+                <div class="form-group row">
+                    <div class="col-md-3">
+                        <nop-override-store-checkbox asp-for="PrivateApiKey_OverrideForStore" asp-input="PrivateApiKey" asp-store-scope="@Model.ActiveStoreScopeConfiguration" />
+                        <nop-label asp-for="PrivateApiKey" />
+                    </div>
+                    <div class="col-md-9">
+                        @* Rendered explicitly: a password editor drops the value attribute, which would hide the saved-key mask. *@
+                        <input asp-for="PrivateApiKey" value="@Model.PrivateApiKey" class="form-control" autocomplete="new-password" />
+                        <span asp-validation-for="PrivateApiKey"></span>
+                        @if (!string.IsNullOrEmpty(Model.PrivateApiKeySuffix))
+                        {
+                            <small class="form-text text-muted">
+                                A private key is saved (ends in <code>****@Model.PrivateApiKeySuffix</code>). Leave the masked value as is to keep it, or type a new key to replace it.
+                            </small>
+                        }
+                        else
+                        {
+                            <small class="form-text text-muted">No private key is saved yet.</small>
+                        }
+                    </div>
+                </div>
+                <div class="form-group row">
+                    <div class="col-md-3">
+                        <nop-override-store-checkbox asp-for="WebhookSigningKey_OverrideForStore" asp-input="WebhookSigningKey" asp-store-scope="@Model.ActiveStoreScopeConfiguration" />
+                        <nop-label asp-for="WebhookSigningKey" />
+                    </div>
+                    <div class="col-md-9">
+                        <input asp-for="WebhookSigningKey" value="@Model.WebhookSigningKey" class="form-control" autocomplete="new-password" />
+                        <span asp-validation-for="WebhookSigningKey"></span>
+                    </div>
+                </div>
+                <div class="form-group row">
+                    <div class="col-md-3">
+                        <nop-override-store-checkbox asp-for="TransactionModeId_OverrideForStore" asp-input="TransactionModeId" asp-store-scope="@Model.ActiveStoreScopeConfiguration" />
+                        <nop-label asp-for="TransactionModeId" />
+                    </div>
+                    <div class="col-md-9">
+                        <nop-select asp-for="TransactionModeId" asp-items="Model.TransactionModes" />
+                        <span asp-validation-for="TransactionModeId"></span>
+                    </div>
+                </div>
+                <div class="form-group row">
+                    <div class="col-md-3">
+                        <nop-override-store-checkbox asp-for="ProcessorId_OverrideForStore" asp-input="ProcessorId" asp-store-scope="@Model.ActiveStoreScopeConfiguration" />
+                        <nop-label asp-for="ProcessorId" />
+                    </div>
+                    <div class="col-md-9">
+                        <nop-editor asp-for="ProcessorId" />
+                        <span asp-validation-for="ProcessorId"></span>
+                    </div>
+                </div>
+                <div class="form-group row">
+                    <div class="col-md-3">
+                        <nop-override-store-checkbox asp-for="DuplicateCheckSeconds_OverrideForStore" asp-input="DuplicateCheckSeconds" asp-store-scope="@Model.ActiveStoreScopeConfiguration" />
+                        <nop-label asp-for="DuplicateCheckSeconds" />
+                    </div>
+                    <div class="col-md-9">
+                        <nop-editor asp-for="DuplicateCheckSeconds" />
+                        <span asp-validation-for="DuplicateCheckSeconds"></span>
+                    </div>
+                </div>
+                <div class="form-group row">
+                    <div class="col-md-3">
+                        <nop-override-store-checkbox asp-for="AdditionalFee_OverrideForStore" asp-input="AdditionalFee" asp-store-scope="@Model.ActiveStoreScopeConfiguration" />
+                        <nop-label asp-for="AdditionalFee" />
+                    </div>
+                    <div class="col-md-9">
+                        <nop-editor asp-for="AdditionalFee" />
+                        <span asp-validation-for="AdditionalFee"></span>
+                    </div>
+                </div>
+                <div class="form-group row">
+                    <div class="col-md-3">
+                        <nop-override-store-checkbox asp-for="AdditionalFeePercentage_OverrideForStore" asp-input="AdditionalFeePercentage" asp-store-scope="@Model.ActiveStoreScopeConfiguration" />
+                        <nop-label asp-for="AdditionalFeePercentage" />
+                    </div>
+                    <div class="col-md-9">
+                        <nop-editor asp-for="AdditionalFeePercentage" />
+                        <span asp-validation-for="AdditionalFeePercentage"></span>
+                    </div>
+                </div>
+                <div class="form-group row">
+                    <div class="col-md-3">
+                        <nop-override-store-checkbox asp-for="EnableDebugLogging_OverrideForStore" asp-input="EnableDebugLogging" asp-store-scope="@Model.ActiveStoreScopeConfiguration" />
+                        <nop-label asp-for="EnableDebugLogging" />
+                    </div>
+                    <div class="col-md-9">
+                        <nop-editor asp-for="EnableDebugLogging" />
+                        <span asp-validation-for="EnableDebugLogging"></span>
+                    </div>
+                </div>
+                <div class="form-group row">
+                    <div class="col-md-9 offset-md-3">
+                        <button type="submit" name="save" class="btn btn-primary">@T("Admin.Common.Save")</button>
+                        <button type="submit" asp-action="TestConnection" class="btn btn-secondary">Test connection</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>

@@ -1,0 +1,11 @@
+{
+  "Group": "Payment methods",
+  "FriendlyName": "NMI Payments",
+  "SystemName": "Payments.Nmi",
+  "Version": "1.0.0",
+  "SupportedVersions": [ "4.60" ],
+  "Author": "Rickel91",
+  "DisplayOrder": 1,
+  "FileName": "Nop.Plugin.Payments.Nmi.dll",
+  "Description": "Accept card payments through the NMI payment gateway using Collect.js tokenization and the Payment API (transact.php)."
+}

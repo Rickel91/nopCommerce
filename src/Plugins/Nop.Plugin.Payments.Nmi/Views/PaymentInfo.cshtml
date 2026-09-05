@@ -1,0 +1,38 @@
+@model Nop.Plugin.Payments.Nmi.Models.PaymentInfoModel
+@{
+    Layout = "";
+}
+
+<div class="nmi-payment-info"
+     data-nmi-payment
+     data-collect-url="@Model.CollectJsUrl"
+     data-tokenization-key="@Model.PublicTokenizationKey"
+     data-card-number-label="@Model.CardNumberLabel"
+     data-expiration-label="@Model.ExpirationLabel"
+     data-security-code-label="@Model.SecurityCodeLabel"
+     data-loading-text="@Model.LoadingText"
+     data-incomplete-text="@Model.IncompleteText"
+     data-processing-text="@Model.ProcessingText"
+     data-ready-text="@Model.ReadyText"
+     data-failure-text="@Model.FailureText">
+    <div class="nmi-payment-fields" data-nmi-fields aria-busy="true">
+        <div class="nmi-field nmi-field-number">
+            <label for="nmi-ccnumber">@Model.CardNumberLabel</label>
+            <div class="nmi-field-input" id="nmi-ccnumber"></div>
+        </div>
+        <div class="nmi-field nmi-field-expiration">
+            <label for="nmi-ccexp">@Model.ExpirationLabel</label>
+            <div class="nmi-field-input" id="nmi-ccexp"></div>
+        </div>
+        <div class="nmi-field nmi-field-cvv">
+            <label for="nmi-cvv">@Model.SecurityCodeLabel</label>
+            <div class="nmi-field-input" id="nmi-cvv"></div>
+        </div>
+    </div>
+    <input type="hidden" name="@NmiDefaults.PaymentTokenFormKey" data-nmi-token value="" autocomplete="off" />
+    <div class="nmi-payment-status" data-nmi-status role="status" aria-live="polite">
+        @Model.LoadingText
+    </div>
+</div>
+<link rel="stylesheet" href="~/Plugins/Payments.Nmi/Content/css/nmi-checkout.css" />
+<script src="~/Plugins/Payments.Nmi/Content/js/nmi-checkout.js"></script>

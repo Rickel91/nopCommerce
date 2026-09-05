@@ -1,0 +1,48 @@
+.nmi-payment-info {
+    max-width: 38rem;
+}
+
+.nmi-payment-fields {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.nmi-payment-fields[aria-busy="true"] {
+    min-height: 8rem;
+    opacity: 0.6;
+}
+
+.nmi-field {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 8rem;
+}
+
+.nmi-field-number {
+    flex-basis: 100%;
+}
+
+.nmi-field label {
+    margin-bottom: 0.25rem;
+}
+
+.nmi-field-input {
+    min-height: 2.5rem;
+    border: 1px solid #ddd;
+    background: #fff;
+}
+
+.nmi-field-input iframe {
+    width: 100%;
+    min-height: 2.5rem;
+    border: 0;
+}
+
+.nmi-payment-status {
+    margin-top: 0.75rem;
+}
+
+.nmi-payment-status.message-error {
+    display: block;
+}

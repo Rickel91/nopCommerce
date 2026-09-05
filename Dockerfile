@@ -33,6 +33,8 @@ WORKDIR /src/Plugins/Nop.Plugin.Payments.CyberSource
 RUN dotnet build Nop.Plugin.Payments.CyberSource.csproj -c Release
 WORKDIR /src/Plugins/Nop.Plugin.Payments.Manual
 RUN dotnet build Nop.Plugin.Payments.Manual.csproj -c Release
+WORKDIR /src/Plugins/Nop.Plugin.Payments.Nmi
+RUN dotnet build Nop.Plugin.Payments.Nmi.csproj -c Release
 WORKDIR /src/Plugins/Nop.Plugin.Payments.PayPalCommerce
 RUN dotnet build Nop.Plugin.Payments.PayPalCommerce.csproj -c Release
 WORKDIR /src/Plugins/Nop.Plugin.Pickup.PickupInStore
