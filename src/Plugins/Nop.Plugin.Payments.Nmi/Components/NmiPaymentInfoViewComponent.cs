@@ -1,4 +1,6 @@
+using System.Globalization;
 using Microsoft.AspNetCore.Mvc;
+using Nop.Core.Infrastructure;
 using Nop.Plugin.Payments.Nmi.Models;
 using Nop.Plugin.Payments.Nmi.Services;
 using Nop.Services.Localization;
@@ -11,12 +13,22 @@ namespace Nop.Plugin.Payments.Nmi.Components;
 /// </summary>
 public class NmiPaymentInfoViewComponent : NopViewComponent
 {
+    private static readonly string[] VersionedAssets =
+    {
+        "~/Plugins/Payments.Nmi/Content/js/nmi-checkout.js",
+        "~/Plugins/Payments.Nmi/Content/css/nmi-checkout.css"
+    };
+
     private readonly ILocalizationService _localizationService;
+    private readonly INopFileProvider _fileProvider;
     private readonly NmiSettings _settings;
 
-    public NmiPaymentInfoViewComponent(ILocalizationService localizationService, NmiSettings settings)
+    public NmiPaymentInfoViewComponent(ILocalizationService localizationService,
+        INopFileProvider fileProvider,
+        NmiSettings settings)
     {
         _localizationService = localizationService;
+        _fileProvider = fileProvider;
         _settings = settings;
     }
 
@@ -39,6 +51,7 @@ public class NmiPaymentInfoViewComponent : NopViewComponent
         {
             PublicTokenizationKey = collectJsUrl is null ? null : _settings.PublicTokenizationKey,
             CollectJsUrl = collectJsUrl,
+            AssetVersion = GetAssetVersion(),
             CardNumberLabel = await GetResourceAsync("Tokenization.CardNumber"),
             ExpirationLabel = await GetResourceAsync("Tokenization.Expiration"),
             SecurityCodeLabel = await GetResourceAsync("Tokenization.SecurityCode"),
@@ -50,6 +63,29 @@ public class NmiPaymentInfoViewComponent : NopViewComponent
         };
 
         return View("~/Plugins/Payments.Nmi/Views/PaymentInfo.cshtml", model);
+    }
+
+    /// <summary>
+    /// Builds a cache key from the newest write time of the plugin's browser assets so redeploys bypass stale browser caches.
+    /// </summary>
+    private string GetAssetVersion()
+    {
+        try
+        {
+            var newest = VersionedAssets
+                .Select(asset => _fileProvider.MapPath(asset))
+                .Where(path => _fileProvider.FileExists(path))
+                .Select(path => _fileProvider.GetLastWriteTimeUtc(path))
+                .DefaultIfEmpty(DateTime.MinValue)
+                .Max();
+            return newest == DateTime.MinValue
+                ? "1"
+                : (newest.Ticks / TimeSpan.TicksPerSecond).ToString(CultureInfo.InvariantCulture);
+        }
+        catch
+        {
+            return "1";
+        }
     }
 
     private Task<string> GetResourceAsync(string name) =>

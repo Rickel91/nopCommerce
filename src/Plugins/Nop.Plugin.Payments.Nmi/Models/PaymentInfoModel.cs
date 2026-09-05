@@ -11,6 +11,11 @@ public record PaymentInfoModel : BaseNopModel
     /// </summary>
     public string CollectJsUrl { get; init; }
 
+    /// <summary>
+    /// Cache-busting key appended to the plugin's own script and stylesheet URLs. Changes whenever the files are redeployed.
+    /// </summary>
+    public string AssetVersion { get; init; }
+
     public string CardNumberLabel { get; init; }
     public string ExpirationLabel { get; init; }
     public string SecurityCodeLabel { get; init; }

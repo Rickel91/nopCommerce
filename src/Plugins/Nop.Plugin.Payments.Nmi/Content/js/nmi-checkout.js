@@ -128,7 +128,8 @@
 
         function guard(event) {
             if (token.value) {
-                setButton(false);
+                // Let this click through to nop's own handler; disable afterwards to stop double submits.
+                setTimeout(function () { setButton(false); }, 0);
                 return;
             }
 
@@ -238,6 +239,8 @@
 
                     token.value = response.token;
                     setStatus(root, root.dataset.readyText, false, true);
+                    // The button was disabled while tokenizing; a disabled button ignores click(), so re-enable first.
+                    setButton(true);
                     resume();
                 }
             });

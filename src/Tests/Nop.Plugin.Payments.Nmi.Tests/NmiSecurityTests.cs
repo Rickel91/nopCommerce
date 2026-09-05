@@ -8,6 +8,7 @@ using Nop.Core.Domain.Directory;
 using Nop.Core.Domain.Stores;
 using Nop.Plugin.Payments.Nmi.Services;
 using Nop.Plugin.Payments.Nmi.Services.Api;
+using Nop.Services.Common;
 using Nop.Services.Customers;
 using Nop.Services.Directory;
 using Nop.Services.Localization;
@@ -123,8 +124,22 @@ public class NmiSecurityTests
                 ? Task.FromResult("localized-message")
                 : throw new NotSupportedException(method.Name));
         var handler = new LogSafetyHandler();
-        var processor = new NmiPaymentProcessor(customerService, new HttpContextAccessor(), localization, new NmiLogger(logger),
-            new NmiHttpClient(new HttpClient(handler), new PassThroughEncryptionService()),
+        var storedToken = "payment-token-sentinel";
+        var genericAttributes = TestInterfaceProxy.Create<IGenericAttributeService>((method, args) =>
+        {
+            switch (method.Name)
+            {
+                case nameof(IGenericAttributeService.GetAttributeAsync):
+                    return Task.FromResult(storedToken);
+                case nameof(IGenericAttributeService.SaveAttributeAsync):
+                    storedToken = args[2] as string;
+                    return Task.CompletedTask;
+                default:
+                    throw new NotSupportedException(method.Name);
+            }
+        });
+        var processor = new NmiPaymentProcessor(customerService, genericAttributes, new HttpContextAccessor(), localization,
+            new NmiLogger(logger), new NmiHttpClient(new HttpClient(handler), new PassThroughEncryptionService()),
             new NmiPaymentExecutionGuard(), RequestBuilder(customerService));
         var request = new ProcessPaymentRequest
         {
@@ -133,7 +148,6 @@ public class NmiSecurityTests
             OrderGuid = Guid.NewGuid(),
             OrderTotal = 10.25m
         };
-        request.CustomValues[NmiDefaults.PaymentTokenCustomValueKey] = "payment-token-sentinel";
         var settings = new NmiSettings
         {
             EncryptedPrivateApiKey = "private-key-sentinel",
@@ -145,6 +159,7 @@ public class NmiSecurityTests
         Assert.True(result.Success);
         Assert.Contains("payment_token=payment-token-sentinel", handler.Body);
         Assert.Empty(request.CustomValues);
+        Assert.Null(storedToken); // consumed before the gateway call so a confirm retry cannot resend it
         // Debug logging emits a "sending" entry and an "approved" entry; neither may carry secrets or card data.
         Assert.Equal(2, messages.Count);
         Assert.All(messages, message => Assert.StartsWith("NMI: ", message));

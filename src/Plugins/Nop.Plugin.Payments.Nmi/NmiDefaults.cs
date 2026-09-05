@@ -17,7 +17,13 @@ public static class NmiDefaults
 
     public const string MaskedSecret = "••••••••";
     public const string PaymentTokenFormKey = "NmiPaymentToken";
-    public const string PaymentTokenCustomValueKey = "Nmi.PaymentToken";
+
+    /// <summary>
+    /// Store-scoped customer generic attribute that carries the single-use Collect.js token from the payment-info
+    /// step to order placement. It is deliberately not a <c>ProcessPaymentRequest.CustomValues</c> entry, because
+    /// nopCommerce prints those on the confirm-order page and persists them with the order.
+    /// </summary>
+    public const string PaymentTokenAttribute = "Nmi.PaymentToken";
 
     /// <summary>
     /// Session key nopCommerce 4.60 uses to hold the checkout <c>ProcessPaymentRequest</c> between the

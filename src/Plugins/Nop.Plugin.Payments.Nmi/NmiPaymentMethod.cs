@@ -5,6 +5,7 @@ using Nop.Core.Domain.Payments;
 using Nop.Core.Domain.ScheduleTasks;
 using Nop.Plugin.Payments.Nmi.Components;
 using Nop.Plugin.Payments.Nmi.Services;
+using Nop.Services.Common;
 using Nop.Services.Configuration;
 using Nop.Services.Localization;
 using Nop.Services.Orders;
@@ -19,30 +20,39 @@ namespace Nop.Plugin.Payments.Nmi;
 /// </summary>
 public class NmiPaymentMethod : BasePlugin, IPaymentMethod
 {
+    private readonly IGenericAttributeService _genericAttributeService;
     private readonly ILocalizationService _localizationService;
     private readonly ISettingService _settingService;
     private readonly IOrderTotalCalculationService _orderTotalCalculationService;
+    private readonly IStoreContext _storeContext;
     private readonly IWebHelper _webHelper;
+    private readonly IWorkContext _workContext;
     private readonly PaymentSettings _paymentSettings;
     private readonly NmiPaymentProcessor _paymentProcessor;
     private readonly NmiOrderOperationService _orderOperationService;
     private readonly IScheduleTaskService _scheduleTaskService;
 
     public NmiPaymentMethod(
+        IGenericAttributeService genericAttributeService,
         ILocalizationService localizationService,
         IOrderTotalCalculationService orderTotalCalculationService,
         ISettingService settingService,
+        IStoreContext storeContext,
         IWebHelper webHelper,
+        IWorkContext workContext,
         NmiSettings nmiSettings,
         PaymentSettings paymentSettings,
         NmiPaymentProcessor paymentProcessor,
         NmiOrderOperationService orderOperationService,
         IScheduleTaskService scheduleTaskService)
     {
+        _genericAttributeService = genericAttributeService;
         _localizationService = localizationService;
         _orderTotalCalculationService = orderTotalCalculationService;
         _settingService = settingService;
+        _storeContext = storeContext;
         _webHelper = webHelper;
+        _workContext = workContext;
         Settings = nmiSettings;
         _paymentSettings = paymentSettings;
         _paymentProcessor = paymentProcessor;
@@ -141,16 +151,18 @@ public class NmiPaymentMethod : BasePlugin, IPaymentMethod
     }
 
     /// <inheritdoc />
-    public Task<ProcessPaymentRequest> GetPaymentInfoAsync(IFormCollection form)
+    public async Task<ProcessPaymentRequest> GetPaymentInfoAsync(IFormCollection form)
     {
         ArgumentNullException.ThrowIfNull(form);
 
-        // Only the single-use Collect.js token is copied; card data never reaches this form.
-        var request = new ProcessPaymentRequest();
-        if (TryGetPaymentToken(form, out var token))
-            request.CustomValues[NmiDefaults.PaymentTokenCustomValueKey] = token;
+        // Only the single-use Collect.js token is kept, and it is parked on the customer record rather than in
+        // CustomValues: nopCommerce renders CustomValues on the confirm page and saves them with the order.
+        var customer = await _workContext.GetCurrentCustomerAsync();
+        var store = await _storeContext.GetCurrentStoreAsync();
+        var token = TryGetPaymentToken(form, out var value) ? value : null;
+        await _genericAttributeService.SaveAttributeAsync(customer, NmiDefaults.PaymentTokenAttribute, token, store.Id);
 
-        return Task.FromResult(request);
+        return new ProcessPaymentRequest();
     }
 
     /// <inheritdoc />

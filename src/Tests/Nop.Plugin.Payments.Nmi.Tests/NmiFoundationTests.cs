@@ -1,6 +1,10 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Primitives;
+using Nop.Core;
+using Nop.Core.Domain.Customers;
 using Nop.Core.Domain.Payments;
+using Nop.Core.Domain.Stores;
+using Nop.Services.Common;
 using Nop.Plugin.Payments.Nmi.Models;
 using Nop.Plugin.Payments.Nmi.Services;
 using Nop.Plugin.Payments.Nmi.Services.Api;
@@ -176,9 +180,28 @@ public class NmiFoundationTests
     }
 
     [Fact]
-    public async Task PaymentInfoCopiesOnlyTokenToCustomValues()
+    public async Task PaymentInfoParksOnlyTokenOnCustomerAndKeepsCustomValuesEmpty()
     {
-        var method = new NmiPaymentMethod(null, null, null, null, new NmiSettings(), new PaymentSettings(), null, null, null);
+        var customer = new Customer { Id = 11 };
+        var saved = new List<(string Key, object Value, int StoreId)>();
+        var attributes = TestInterfaceProxy.Create<IGenericAttributeService>((method, args) =>
+        {
+            if (method.Name != nameof(IGenericAttributeService.SaveAttributeAsync))
+                throw new NotSupportedException(method.Name);
+            Assert.Same(customer, args[0]);
+            saved.Add(((string)args[1], args[2], (int)args[3]));
+            return Task.CompletedTask;
+        });
+        var workContext = TestInterfaceProxy.Create<IWorkContext>((method, _) =>
+            method.Name == nameof(IWorkContext.GetCurrentCustomerAsync)
+                ? Task.FromResult(customer)
+                : throw new NotSupportedException(method.Name));
+        var storeContext = TestInterfaceProxy.Create<IStoreContext>((method, _) =>
+            method.Name == nameof(IStoreContext.GetCurrentStoreAsync)
+                ? Task.FromResult(new Store { Id = 7 })
+                : throw new NotSupportedException(method.Name));
+        var method = new NmiPaymentMethod(attributes, null, null, null, storeContext, null, workContext,
+            new NmiSettings(), new PaymentSettings(), null, null, null);
         var form = CreateForm(
             (NmiDefaults.PaymentTokenFormKey, "token-value"),
             ("CardNumber", "pan-must-not-be-read"),
@@ -186,11 +209,12 @@ public class NmiFoundationTests
 
         var request = await method.GetPaymentInfoAsync(form);
 
-        var value = Assert.Single(request.CustomValues);
-        Assert.Equal(NmiDefaults.PaymentTokenCustomValueKey, value.Key);
-        Assert.Equal("token-value", value.Value);
-        Assert.True(NmiPaymentProcessor.TryGetPaymentToken(request, out var token));
-        Assert.Equal("token-value", token);
+        // Nothing may reach CustomValues: nopCommerce shows them on the confirm page and stores them with the order.
+        Assert.Empty(request.CustomValues);
+        var entry = Assert.Single(saved);
+        Assert.Equal(NmiDefaults.PaymentTokenAttribute, entry.Key);
+        Assert.Equal("token-value", entry.Value);
+        Assert.Equal(7, entry.StoreId);
     }
 
     [Theory]

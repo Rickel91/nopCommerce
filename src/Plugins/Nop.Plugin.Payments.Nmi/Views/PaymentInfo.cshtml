@@ -37,5 +37,5 @@
 @* The "!" prefix opts these tags out of nop's script/link tag helpers, which would otherwise hoist them into the
    page layout bundle. This view is also delivered as an AJAX partial (one-page checkout) where no layout exists,
    so the resources must render inline. *@
-<!link rel="stylesheet" href="@Url.Content("~/Plugins/Payments.Nmi/Content/css/nmi-checkout.css")" />
-<!script src="@Url.Content("~/Plugins/Payments.Nmi/Content/js/nmi-checkout.js")"></!script>
+<!link rel="stylesheet" href="@Url.Content("~/Plugins/Payments.Nmi/Content/css/nmi-checkout.css")?v=@Model.AssetVersion" />
+<!script src="@Url.Content("~/Plugins/Payments.Nmi/Content/js/nmi-checkout.js")?v=@Model.AssetVersion"></!script>

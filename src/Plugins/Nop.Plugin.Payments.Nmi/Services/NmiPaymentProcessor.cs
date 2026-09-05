@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Nop.Core.Domain.Customers;
 using Nop.Plugin.Payments.Nmi.Services.Api;
+using Nop.Services.Common;
 using Nop.Services.Customers;
 using Nop.Services.Localization;
 using Nop.Services.Payments;
@@ -12,6 +13,7 @@ public class NmiPaymentProcessor
     #region Fields
 
     private readonly ICustomerService _customerService;
+    private readonly IGenericAttributeService _genericAttributeService;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ILocalizationService _localizationService;
     private readonly NmiLogger _log;
@@ -24,6 +26,7 @@ public class NmiPaymentProcessor
     #region Ctor
 
     public NmiPaymentProcessor(ICustomerService customerService,
+        IGenericAttributeService genericAttributeService,
         IHttpContextAccessor httpContextAccessor,
         ILocalizationService localizationService,
         NmiLogger log,
@@ -32,6 +35,7 @@ public class NmiPaymentProcessor
         NmiPaymentRequestBuilder requestBuilder)
     {
         _customerService = customerService;
+        _genericAttributeService = genericAttributeService;
         _httpContextAccessor = httpContextAccessor;
         _localizationService = localizationService;
         _log = log ?? NmiLogger.None;
@@ -51,53 +55,7 @@ public class NmiPaymentProcessor
 
         var correlation = paymentRequest.OrderGuid.ToString("N");
         var messages = await GetMessagesAsync();
-        if (!TryGetPaymentToken(paymentRequest, out var token))
-        {
-            await _log.WarningAsync(
-                $"payment rejected before gateway call; correlation={correlation}; customer={paymentRequest.CustomerId}; " +
-                "reason=missing_or_invalid_payment_token. The shopper must re-enter card details.");
-            return new ProcessPaymentResult { Errors = new List<string> { await ResourceAsync("Processing.MissingToken") } };
-        }
 
-        if (!_executionGuard.TryAcquire(paymentRequest.OrderGuid, out var executionLease))
-        {
-            await _log.WarningAsync(
-                $"payment rejected before gateway call; correlation={correlation}; customer={paymentRequest.CustomerId}; " +
-                "reason=duplicate_submission_in_progress.");
-            return new ProcessPaymentResult { Errors = new List<string> { await ResourceAsync("Processing.InProgress") } };
-        }
-
-        using (executionLease)
-            return await ProcessAcquiredAsync(settings, paymentRequest, token, messages, correlation);
-    }
-
-    #endregion
-
-    #region Utilities
-
-    internal static bool TryGetPaymentToken(ProcessPaymentRequest paymentRequest, out string token)
-    {
-        token = null;
-        if (paymentRequest?.CustomValues is null ||
-            !paymentRequest.CustomValues.TryGetValue(NmiDefaults.PaymentTokenCustomValueKey, out var tokenValue))
-            return false;
-
-        var candidate = (tokenValue as string ?? tokenValue?.ToString())?.Trim();
-        if (!NmiPaymentMethod.IsValidPaymentToken(candidate))
-            return false;
-
-        token = candidate;
-        return true;
-    }
-
-    private async Task<ProcessPaymentResult> ProcessAcquiredAsync(NmiSettings settings,
-        ProcessPaymentRequest paymentRequest,
-        string token,
-        NmiPaymentMessages messages,
-        string correlation)
-    {
-        // The token must never be persisted with the order's custom values.
-        paymentRequest.CustomValues.Remove(NmiDefaults.PaymentTokenCustomValueKey);
         var customer = await _customerService.GetCustomerByIdAsync(paymentRequest.CustomerId);
         if (customer is null)
         {
@@ -106,7 +64,50 @@ public class NmiPaymentProcessor
             return new ProcessPaymentResult { Errors = new List<string> { messages.Failed } };
         }
 
-        // Consume the checkout request before the side-effecting call so confirm retries cannot reuse its single-use token.
+        var token = await GetPaymentTokenAsync(customer, paymentRequest.StoreId);
+        if (token is null)
+        {
+            await _log.WarningAsync(
+                $"payment rejected before gateway call; correlation={correlation}; store={paymentRequest.StoreId}; " +
+                "reason=missing_or_invalid_payment_token. The shopper must re-enter card details.", customer: customer);
+            return new ProcessPaymentResult { Errors = new List<string> { await ResourceAsync("Processing.MissingToken") } };
+        }
+
+        if (!_executionGuard.TryAcquire(paymentRequest.OrderGuid, out var executionLease))
+        {
+            await _log.WarningAsync(
+                $"payment rejected before gateway call; correlation={correlation}; store={paymentRequest.StoreId}; " +
+                "reason=duplicate_submission_in_progress.", customer: customer);
+            return new ProcessPaymentResult { Errors = new List<string> { await ResourceAsync("Processing.InProgress") } };
+        }
+
+        using (executionLease)
+            return await ProcessAcquiredAsync(settings, paymentRequest, customer, token, messages, correlation);
+    }
+
+    #endregion
+
+    #region Utilities
+
+    /// <summary>
+    /// Reads the single-use token parked on the customer by <see cref="NmiPaymentMethod.GetPaymentInfoAsync"/>.
+    /// </summary>
+    private async Task<string> GetPaymentTokenAsync(Customer customer, int storeId)
+    {
+        var stored = await _genericAttributeService.GetAttributeAsync<string>(customer, NmiDefaults.PaymentTokenAttribute, storeId);
+        var candidate = stored?.Trim();
+        return NmiPaymentMethod.IsValidPaymentToken(candidate) ? candidate : null;
+    }
+
+    private async Task<ProcessPaymentResult> ProcessAcquiredAsync(NmiSettings settings,
+        ProcessPaymentRequest paymentRequest,
+        Customer customer,
+        string token,
+        NmiPaymentMessages messages,
+        string correlation)
+    {
+        // Consume the token and the checkout request before the side-effecting call so confirm retries cannot reuse them.
+        await _genericAttributeService.SaveAttributeAsync<string>(customer, NmiDefaults.PaymentTokenAttribute, null, paymentRequest.StoreId);
         TryConsumeCheckoutRequest();
 
         if (string.IsNullOrWhiteSpace(settings.EncryptedPrivateApiKey))
