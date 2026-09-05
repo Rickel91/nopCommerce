@@ -16,12 +16,13 @@
     var vendorPromise = null;
     var active = null;
 
-    function setStatus(root, text, isError) {
+    function setStatus(root, text, isError, isSuccess) {
         var status = root.querySelector('[data-nmi-status]');
         if (!status)
             return;
         status.textContent = text || '';
         status.classList.toggle('message-error', Boolean(isError));
+        status.classList.toggle('message-success', Boolean(isSuccess) && !isError);
     }
 
     function getContinueButton(root) {
@@ -159,7 +160,36 @@
         loadVendor(root).then(function () {
             window.CollectJS.configure({
                 variant: 'inline',
-                styleSniffer: true,
+                // Inputs live inside gateway iframes, so their look is declared here rather than in the stylesheet.
+                styleSniffer: false,
+                customCss: {
+                    'box-sizing': 'border-box',
+                    'height': '44px',
+                    'padding': '0 12px',
+                    'border': '1px solid #d5d5d5',
+                    'border-radius': '4px',
+                    'background-color': '#ffffff',
+                    'color': '#333333',
+                    'font-family': 'Arial, Helvetica, sans-serif',
+                    'font-size': '15px',
+                    'line-height': '42px',
+                    'transition': 'border-color 150ms, box-shadow 150ms'
+                },
+                placeholderCss: {
+                    'color': '#9a9a9a'
+                },
+                focusCss: {
+                    'border-color': '#4ab2f1',
+                    'box-shadow': '0 0 0 3px rgba(74, 178, 241, 0.25)',
+                    'outline': 'none'
+                },
+                validCss: {
+                    'border-color': '#4cb17c'
+                },
+                invalidCss: {
+                    'border-color': '#e4434b',
+                    'color': '#b8322f'
+                },
                 timeoutDuration: 15000,
                 fields: {
                     ccnumber: {
@@ -207,7 +237,7 @@
                     }
 
                     token.value = response.token;
-                    setStatus(root, root.dataset.readyText, false);
+                    setStatus(root, root.dataset.readyText, false, true);
                     resume();
                 }
             });
