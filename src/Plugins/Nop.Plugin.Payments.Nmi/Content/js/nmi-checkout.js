@@ -44,9 +44,10 @@
 
             var script = document.createElement('script');
             script.src = root.dataset.collectUrl;
+            // Only the tokenization key goes on the script tag. Any other data-* attribute (for example
+            // data-variant) makes Collect.js auto-configure itself at load time and fail before it exposes
+            // window.CollectJS; the inline variant and field selectors are passed to configure() instead.
             script.setAttribute('data-tokenization-key', root.dataset.tokenizationKey);
-            script.setAttribute('data-variant', 'inline');
-            script.dataset.nmiVendor = 'true';
             script.onload = function () {
                 if (window.CollectJS)
                     resolve();

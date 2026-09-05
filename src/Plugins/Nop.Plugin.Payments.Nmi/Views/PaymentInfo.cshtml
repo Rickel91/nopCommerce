@@ -34,5 +34,8 @@
         @Model.LoadingText
     </div>
 </div>
-<link rel="stylesheet" href="~/Plugins/Payments.Nmi/Content/css/nmi-checkout.css" />
-<script src="~/Plugins/Payments.Nmi/Content/js/nmi-checkout.js"></script>
+@* The "!" prefix opts these tags out of nop's script/link tag helpers, which would otherwise hoist them into the
+   page layout bundle. This view is also delivered as an AJAX partial (one-page checkout) where no layout exists,
+   so the resources must render inline. *@
+<!link rel="stylesheet" href="@Url.Content("~/Plugins/Payments.Nmi/Content/css/nmi-checkout.css")" />
+<!script src="@Url.Content("~/Plugins/Payments.Nmi/Content/js/nmi-checkout.js")"></!script>
