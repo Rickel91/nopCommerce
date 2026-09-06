@@ -50,6 +50,20 @@ public class NmiPaymentRequestBuilderTests
         Assert.Null(actual.ShippingAddress);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    public async Task DuplicateWindowIsOmittedUnlessExplicitlyConfigured(int configured)
+    {
+        var request = new ProcessPaymentRequest { OrderGuid = Guid.NewGuid(), OrderTotal = 5m, StoreId = 7 };
+
+        var actual = await Builder().BuildAsync(request, new NmiSettings { DuplicateCheckSeconds = configured },
+            new Customer(), "single-use-token");
+
+        Assert.Null(actual.DuplicateCheckSeconds);
+        Assert.DoesNotContain(actual.ToFormFields(), field => field.Key == "dup_seconds");
+    }
+
     [Fact]
     public void FormFieldsUseClassicPaymentApiVariableNamesAndOmitEmptyValues()
     {

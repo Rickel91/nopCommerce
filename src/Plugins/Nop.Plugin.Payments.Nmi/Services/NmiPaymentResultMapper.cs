@@ -27,6 +27,8 @@ public static class NmiPaymentResultMapper
         if (!response.IsApproved || string.IsNullOrWhiteSpace(response.TransactionId))
             return Failed(messages.Ambiguous);
 
+        // AllowStoringCreditCardNumber gates nop's CardType/expiry columns. The "number" nop receives from this plugin
+        // is already masked (asterisks plus last four), so enabling it exposes brand, last four and expiry only.
         var diagnostic = BuildDiagnostic(response);
         return mode == NmiTransactionMode.Authorize
             ? new ProcessPaymentResult
@@ -34,20 +36,23 @@ public static class NmiPaymentResultMapper
                 AuthorizationTransactionId = response.TransactionId,
                 AuthorizationTransactionCode = response.AuthorizationCode,
                 AuthorizationTransactionResult = diagnostic,
-                NewPaymentStatus = PaymentStatus.Authorized
+                NewPaymentStatus = PaymentStatus.Authorized,
+                AllowStoringCreditCardNumber = true
             }
             : new ProcessPaymentResult
             {
                 CaptureTransactionId = response.TransactionId,
                 CaptureTransactionResult = diagnostic,
-                NewPaymentStatus = PaymentStatus.Paid
+                NewPaymentStatus = PaymentStatus.Paid,
+                AllowStoringCreditCardNumber = true
             };
     }
 
     public static string BuildDiagnostic(NmiTransactionResponse response) =>
         $"response={Safe(response?.Response)}; response_code={Safe(response?.ResponseCode)}; " +
         $"response_text={Safe(Truncate(response?.ResponseText, 120))}; " +
-        $"avs_result={Safe(response?.AvsResponse)}; cvv_result={Safe(response?.CvvResponse)}";
+        $"avs_result={NmiRedactor.Redact(NmiResponseCodes.Format(response?.AvsResponse, NmiResponseCodes.DescribeAvs))}; " +
+        $"cvv_result={NmiRedactor.Redact(NmiResponseCodes.Format(response?.CvvResponse, NmiResponseCodes.DescribeCvv))}";
 
     private static ProcessPaymentResult Failed(string message) => new() { Errors = new List<string> { message } };
 

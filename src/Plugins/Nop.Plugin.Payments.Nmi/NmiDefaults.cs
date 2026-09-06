@@ -19,6 +19,14 @@ public static class NmiDefaults
     public const string PaymentTokenFormKey = "NmiPaymentToken";
 
     /// <summary>
+    /// Masked card metadata that Collect.js returns alongside the token (last four digits, brand, expiry MMYY).
+    /// Never a full card number; used only to populate nop's masked card fields on the order.
+    /// </summary>
+    public const string CardLast4FormKey = "NmiCardLast4";
+    public const string CardBrandFormKey = "NmiCardBrand";
+    public const string CardExpirationFormKey = "NmiCardExpiration";
+
+    /// <summary>
     /// Store-scoped customer generic attribute that carries the single-use Collect.js token from the payment-info
     /// step to order placement. It is deliberately not a <c>ProcessPaymentRequest.CustomValues</c> entry, because
     /// nopCommerce prints those on the confirm-order page and persists them with the order.

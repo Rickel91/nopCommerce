@@ -36,6 +36,28 @@ public class NmiGatewayContractTests
     }
 
     [Fact]
+    public async Task OrderNumberTravelsOnCaptureAndOnTransactionUpdate()
+    {
+        var server = new MockNmiHttpServer();
+        var client = Client(server);
+
+        var capture = await client.CapturePaymentAsync(Settings(), "root-payment", 12.34m, "1001");
+        var update = await client.UpdateTransactionAsync(Settings(), "root-payment", "My Store order #1001", "1001");
+        var unsafeReference = await client.UpdateTransactionAsync(Settings(), "root-payment", "desc", "<script>&1001");
+
+        Assert.True(capture.IsSuccess);
+        Assert.True(update.IsSuccess);
+        Assert.Collection(server.Requests,
+            request => AssertRequest(request, "type=capture", "transactionid=root-payment", "amount=12.34", "orderid=1001"),
+            request => AssertRequest(request, "type=update", "transactionid=root-payment", "order_description=My+Store+order+%231001", "ponumber=1001"),
+            request =>
+            {
+                AssertRequest(request, "type=update", "ponumber=script1001");
+                Assert.DoesNotContain("%3C", request.Body);
+            });
+    }
+
+    [Fact]
     public async Task InMemoryNmiServerSeparatesDefinitiveAndAmbiguousFailures()
     {
         var server = new MockNmiHttpServer();

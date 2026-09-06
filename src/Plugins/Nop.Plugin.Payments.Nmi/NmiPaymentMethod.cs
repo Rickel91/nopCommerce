@@ -73,6 +73,8 @@ public class NmiPaymentMethod : BasePlugin, IPaymentMethod
     public Task PostProcessPaymentAsync(PostProcessPaymentRequest postProcessPaymentRequest)
     {
         ArgumentNullException.ThrowIfNull(postProcessPaymentRequest);
+        // Nothing to do here: nop skips this hook for paid orders, so the order number is stamped on the gateway
+        // transaction by NmiOrderPlacedEventConsumer instead.
         return Task.CompletedTask;
     }
 
@@ -162,7 +164,40 @@ public class NmiPaymentMethod : BasePlugin, IPaymentMethod
         var token = TryGetPaymentToken(form, out var value) ? value : null;
         await _genericAttributeService.SaveAttributeAsync(customer, NmiDefaults.PaymentTokenAttribute, token, store.Id);
 
-        return new ProcessPaymentRequest();
+        // Masked metadata (brand, last four, expiry) lets the admin order page show which card was used.
+        var request = new ProcessPaymentRequest();
+        ApplyMaskedCardMetadata(request, form);
+        return request;
+    }
+
+    /// <summary>
+    /// Copies the masked card details Collect.js reported into nop's standard card fields. The "number" is always
+    /// twelve asterisks plus the last four digits, so nothing sensitive is ever stored.
+    /// </summary>
+    internal static void ApplyMaskedCardMetadata(ProcessPaymentRequest request, IFormCollection form)
+    {
+        var last4 = Single(form, NmiDefaults.CardLast4FormKey);
+        if (last4?.Length == 4 && last4.All(char.IsAsciiDigit))
+            request.CreditCardNumber = new string('*', 12) + last4;
+
+        var brand = Single(form, NmiDefaults.CardBrandFormKey);
+        if (!string.IsNullOrEmpty(brand) && brand.Length <= 20 && brand.All(c => char.IsAsciiLetterOrDigit(c) || c is ' ' or '_' or '-'))
+            request.CreditCardType = char.ToUpperInvariant(brand[0]) + brand[1..].ToLowerInvariant();
+
+        var expiration = Single(form, NmiDefaults.CardExpirationFormKey);
+        if (expiration?.Length == 4 && expiration.All(char.IsAsciiDigit) &&
+            int.TryParse(expiration[..2], out var month) && month is >= 1 and <= 12 &&
+            int.TryParse(expiration[2..], out var year))
+        {
+            request.CreditCardExpireMonth = month;
+            request.CreditCardExpireYear = 2000 + year;
+        }
+    }
+
+    private static string Single(IFormCollection form, string key)
+    {
+        var values = form[key];
+        return values.Count == 1 ? values[0]?.Trim() : null;
     }
 
     /// <inheritdoc />
@@ -216,7 +251,7 @@ public class NmiPaymentMethod : BasePlugin, IPaymentMethod
                 "Optional. Routes transactions to a specific processor when the account uses multiple MIDs.",
             [$"{NmiDefaults.LocaleResourcePrefix}.Fields.DuplicateCheckSeconds"] = "Duplicate check seconds",
             [$"{NmiDefaults.LocaleResourcePrefix}.Fields.DuplicateCheckSeconds.Hint"] =
-                "Window for the gateway's duplicate transaction check. 0 disables the check.",
+                "Optional override of the processor's duplicate-transaction window, in seconds. Leave at 0 to keep the processor's own setting; some processors reject any override.",
             [$"{NmiDefaults.LocaleResourcePrefix}.Fields.AdditionalFee"] = "Additional fee",
             [$"{NmiDefaults.LocaleResourcePrefix}.Fields.AdditionalFeePercentage"] = "Use percentage fee",
             [$"{NmiDefaults.LocaleResourcePrefix}.Fields.EnableDebugLogging"] = "Enable sanitized debug logging",

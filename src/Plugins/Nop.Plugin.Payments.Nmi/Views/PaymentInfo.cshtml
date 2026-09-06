@@ -30,6 +30,10 @@
         </div>
     </div>
     <input type="hidden" name="@NmiDefaults.PaymentTokenFormKey" data-nmi-token value="" autocomplete="off" />
+    @* Masked metadata from the Collect.js callback: last four digits, brand, and MMYY expiry. No full card number. *@
+    <input type="hidden" name="@NmiDefaults.CardLast4FormKey" data-nmi-card-last4 value="" autocomplete="off" />
+    <input type="hidden" name="@NmiDefaults.CardBrandFormKey" data-nmi-card-brand value="" autocomplete="off" />
+    <input type="hidden" name="@NmiDefaults.CardExpirationFormKey" data-nmi-card-expiration value="" autocomplete="off" />
     <div class="nmi-payment-status" data-nmi-status role="status" aria-live="polite">
         @Model.LoadingText
     </div>

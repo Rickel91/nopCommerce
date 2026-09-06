@@ -26,11 +26,26 @@ public class NmiPaymentProcessingTests
 
         Assert.True(result.Success);
         Assert.Equal(expected, result.NewPaymentStatus);
+        Assert.True(result.AllowStoringCreditCardNumber, "nop stores card type and expiry only when this flag is set");
         Assert.Equal("txn-123", mode == NmiTransactionMode.Authorize
             ? result.AuthorizationTransactionId
             : result.CaptureTransactionId);
         if (mode == NmiTransactionMode.Authorize)
             Assert.Equal("AUTH1", result.AuthorizationTransactionCode);
+    }
+
+    [Fact]
+    public void DiagnosticCarriesAvsAndCvvCodesWithMeanings()
+    {
+        var response = ApprovedResponse() with { AvsResponse = "N", CvvResponse = "M" };
+
+        var result = NmiPaymentResultMapper.Map(new(response, null, 200), NmiTransactionMode.AuthorizeAndCapture, Messages);
+
+        Assert.Contains("avs_result=N (no match)", result.CaptureTransactionResult);
+        Assert.Contains("cvv_result=M (match)", result.CaptureTransactionResult);
+        Assert.Contains("avs_result=unknown", NmiPaymentResultMapper.BuildDiagnostic(ApprovedResponse()));
+        Assert.Equal("Y (address and postal code match)", NmiResponseCodes.Format("y", NmiResponseCodes.DescribeAvs));
+        Assert.Equal("Q (unrecognised code)", NmiResponseCodes.Format("Q", NmiResponseCodes.DescribeCvv));
     }
 
     [Fact]

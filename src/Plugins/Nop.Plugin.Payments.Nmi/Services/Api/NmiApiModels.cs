@@ -12,6 +12,7 @@ public static class NmiTransactionTypes
     public const string Capture = "capture";
     public const string Void = "void";
     public const string Refund = "refund";
+    public const string Update = "update";
 }
 
 /// <summary>
@@ -215,4 +216,51 @@ public sealed record NmiCredentialCheckResult(bool Accepted, string Detail, int 
 public static class NmiFormat
 {
     public static string Amount(decimal amount) => amount.ToString("0.00", CultureInfo.InvariantCulture);
+}
+
+/// <summary>
+/// Human-readable meanings for the gateway's AVS and CVV result codes, appended to diagnostics and order notes.
+/// </summary>
+public static class NmiResponseCodes
+{
+    public static string DescribeAvs(string code) => Normalize(code) switch
+    {
+        "X" or "Y" or "D" or "M" => "address and postal code match",
+        "A" or "B" => "address matches, postal code does not",
+        "W" or "Z" or "P" or "L" => "postal code matches, address does not",
+        "N" or "C" => "no match",
+        "U" or "G" or "I" => "verification unavailable for this card",
+        "R" => "issuer system unavailable, retry",
+        "S" => "not supported by issuer",
+        "E" => "verification error",
+        "0" => "not checked",
+        "" => null,
+        _ => "unrecognised code"
+    };
+
+    public static string DescribeCvv(string code) => Normalize(code) switch
+    {
+        "M" => "match",
+        "N" => "no match",
+        "P" => "not processed",
+        "S" => "expected but not provided",
+        "U" => "issuer does not support verification",
+        "X" => "no response from issuer",
+        "" => null,
+        _ => "unrecognised code"
+    };
+
+    /// <summary>
+    /// Formats a code as <c>N (no match)</c>, or <c>unknown</c> when the gateway did not return one.
+    /// </summary>
+    public static string Format(string code, Func<string, string> describe)
+    {
+        var normalized = Normalize(code);
+        if (normalized.Length == 0)
+            return "unknown";
+        var description = describe(normalized);
+        return description is null ? normalized : $"{normalized} ({description})";
+    }
+
+    private static string Normalize(string code) => (code ?? string.Empty).Trim().ToUpperInvariant();
 }

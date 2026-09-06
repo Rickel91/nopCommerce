@@ -71,7 +71,10 @@ public class NmiPaymentRequestBuilder
             Currency = currencyCode,
             PaymentToken = paymentToken,
             ProcessorId = EmptyToNull(TrimTo(settings.ProcessorId, 50)),
-            DuplicateCheckSeconds = Math.Clamp(settings.DuplicateCheckSeconds, 0, 7_862_400),
+            // Only override the processor's duplicate window when explicitly configured; some processors reject any override.
+            DuplicateCheckSeconds = settings.DuplicateCheckSeconds > 0
+                ? Math.Min(settings.DuplicateCheckSeconds, 7_862_400)
+                : null,
             BillingAddress = await BuildAddressAsync(billingAddress),
             ShippingAddress = await BuildAddressAsync(shippingAddress),
             OrderId = orderId,

@@ -25,6 +25,23 @@
         status.classList.toggle('message-success', Boolean(isSuccess) && !isError);
     }
 
+    // Copies the masked card metadata from the Collect.js callback (never a full PAN) into hidden fields so the
+    // order can show brand, last four digits and expiry. Pass null to clear.
+    function setCardMeta(root, card) {
+        var last4 = root.querySelector('[data-nmi-card-last4]');
+        var brand = root.querySelector('[data-nmi-card-brand]');
+        var expiration = root.querySelector('[data-nmi-card-expiration]');
+        var digits = card && card.number ? String(card.number).replace(/\D/g, '') : '';
+        if (last4)
+            last4.value = digits.length >= 4 ? digits.slice(-4) : '';
+        if (brand)
+            brand.value = card && card.type ? String(card.type).replace(/[^A-Za-z0-9 _-]/g, '').slice(0, 20) : '';
+        if (expiration) {
+            var exp = card && card.exp ? String(card.exp).replace(/\D/g, '') : '';
+            expiration.value = exp.length === 4 ? exp : '';
+        }
+    }
+
     function getContinueButton(root) {
         var form = root.closest('form');
         return (form && form.querySelector('.payment-info-next-step-button')) ||
@@ -84,6 +101,7 @@
 
         function fail(text) {
             token.value = '';
+            setCardMeta(root, null);
             state.tokenizing = false;
             setButton(state.ready);
             setStatus(root, text, true);
@@ -146,6 +164,7 @@
 
         root.nmiReset = function () {
             token.value = '';
+            setCardMeta(root, null);
             state.tokenizing = false;
             if (window.CollectJS && state.ready) {
                 try {
@@ -238,6 +257,7 @@
                     }
 
                     token.value = response.token;
+                    setCardMeta(root, response.card);
                     setStatus(root, root.dataset.readyText, false, true);
                     // The button was disabled while tokenizing; a disabled button ignores click(), so re-enable first.
                     setButton(true);

@@ -28,7 +28,13 @@ public class NmiSettings : ISettings
     public string EncryptedWebhookSigningKey { get; set; }
     public NmiTransactionMode TransactionMode { get; set; } = NmiTransactionMode.AuthorizeAndCapture;
     public string ProcessorId { get; set; }
-    public int DuplicateCheckSeconds { get; set; } = 120;
+
+    /// <summary>
+    /// Seconds for the gateway's duplicate-transaction window (<c>dup_seconds</c>). 0 means "do not send it" and leaves
+    /// the processor's own threshold in place; some processors reject any override with
+    /// "Overriding Duplicate Threshold is not allowed for this processor".
+    /// </summary>
+    public int DuplicateCheckSeconds { get; set; } = 0;
     public decimal AdditionalFee { get; set; }
     public bool AdditionalFeePercentage { get; set; }
     public bool EnableDebugLogging { get; set; }

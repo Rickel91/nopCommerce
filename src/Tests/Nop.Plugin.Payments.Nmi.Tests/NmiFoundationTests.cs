@@ -5,6 +5,7 @@ using Nop.Core.Domain.Customers;
 using Nop.Core.Domain.Payments;
 using Nop.Core.Domain.Stores;
 using Nop.Services.Common;
+using Nop.Services.Payments;
 using Nop.Plugin.Payments.Nmi.Models;
 using Nop.Plugin.Payments.Nmi.Services;
 using Nop.Plugin.Payments.Nmi.Services.Api;
@@ -215,6 +216,43 @@ public class NmiFoundationTests
         Assert.Equal(NmiDefaults.PaymentTokenAttribute, entry.Key);
         Assert.Equal("token-value", entry.Value);
         Assert.Equal(7, entry.StoreId);
+    }
+
+    [Fact]
+    public void MaskedCardMetadataMapsToNopCardFieldsWithoutExposingAPan()
+    {
+        var request = new ProcessPaymentRequest();
+        var form = CreateForm(
+            (NmiDefaults.CardLast4FormKey, "1111"),
+            (NmiDefaults.CardBrandFormKey, "visa"),
+            (NmiDefaults.CardExpirationFormKey, "1230"));
+
+        NmiPaymentMethod.ApplyMaskedCardMetadata(request, form);
+
+        Assert.Equal("************1111", request.CreditCardNumber);
+        Assert.Equal("Visa", request.CreditCardType);
+        Assert.Equal(12, request.CreditCardExpireMonth);
+        Assert.Equal(2030, request.CreditCardExpireYear);
+    }
+
+    [Theory]
+    [InlineData("4111111111111111", "visa", "1230")]
+    [InlineData("11a1", "visa", "1230")]
+    [InlineData("1111", "<script>", "1330")]
+    public void InvalidCardMetadataIsIgnored(string last4, string brand, string expiration)
+    {
+        var request = new ProcessPaymentRequest();
+        var form = CreateForm(
+            (NmiDefaults.CardLast4FormKey, last4),
+            (NmiDefaults.CardBrandFormKey, brand),
+            (NmiDefaults.CardExpirationFormKey, expiration));
+
+        NmiPaymentMethod.ApplyMaskedCardMetadata(request, form);
+
+        Assert.True(request.CreditCardNumber is null || request.CreditCardNumber == "************1111");
+        Assert.DoesNotContain("4111111111111111", request.CreditCardNumber ?? string.Empty);
+        Assert.True(request.CreditCardType is null or "Visa");
+        Assert.True(request.CreditCardExpireMonth is 0 or 12);
     }
 
     [Theory]

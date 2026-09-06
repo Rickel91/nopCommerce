@@ -6,6 +6,7 @@ using Nop.Services.Localization;
 using Nop.Services.Logging;
 using Nop.Services.Orders;
 using Nop.Services.Payments;
+using Nop.Services.Stores;
 
 namespace Nop.Plugin.Payments.Nmi.Services;
 
@@ -15,16 +16,80 @@ public class NmiOrderOperationService
     private readonly ILocalizationService _localizationService;
     private readonly NmiLogger _log;
     private readonly IOrderService _orderService;
+    private readonly IStoreService _storeService;
 
     public NmiOrderOperationService(NmiHttpClient httpClient,
         ILocalizationService localizationService,
         NmiLogger log,
-        IOrderService orderService)
+        IOrderService orderService,
+        IStoreService storeService)
     {
         _httpClient = httpClient;
         _localizationService = localizationService;
         _log = log ?? NmiLogger.None;
         _orderService = orderService;
+        _storeService = storeService;
+    }
+
+    /// <summary>
+    /// Stamps the gateway transaction with the store order number once nop has assigned it (order description and
+    /// PO number, since <c>orderid</c> is fixed at sale time to the order GUID). Never throws; failures are logged.
+    /// </summary>
+    public async Task StampOrderReferenceAsync(NmiSettings settings, Order order)
+    {
+        if (settings is null || order is null)
+            return;
+
+        var transactionId = string.IsNullOrWhiteSpace(order.CaptureTransactionId)
+            ? order.AuthorizationTransactionId
+            : order.CaptureTransactionId;
+        var orderNumber = string.IsNullOrWhiteSpace(order.CustomOrderNumber) ? order.Id.ToString() : order.CustomOrderNumber;
+        if (string.IsNullOrWhiteSpace(transactionId) || string.IsNullOrWhiteSpace(settings.EncryptedPrivateApiKey))
+            return;
+
+        try
+        {
+            var store = await _storeService.GetStoreByIdAsync(order.StoreId);
+            var description = $"{store?.Name ?? "nopCommerce"} order #{orderNumber}";
+            var result = await _httpClient.UpdateTransactionAsync(settings, transactionId, description, orderNumber);
+            var response = result.Value;
+            var summary = $"order={order.Id}; order_number={orderNumber}; transaction={transactionId}; " +
+                          $"http_status={result.StatusCode}; elapsed_ms={result.ElapsedMilliseconds}; " +
+                          $"response={response?.Response ?? "none"}; response_text={NmiRedactor.Redact(response?.ResponseText ?? result.Error?.ErrorCode ?? "none")}";
+            if (result.IsSuccess && response.IsApproved)
+            {
+                await _log.DebugAsync(settings, $"order reference stamped on gateway transaction; {summary}.");
+                await TryInsertNoteAsync(order, $"NMI transaction {transactionId} tagged with order #{orderNumber} (description and PO number).");
+            }
+            else
+            {
+                await _log.WarningAsync($"order reference could not be stamped on gateway transaction; {summary}.");
+            }
+        }
+        catch (Exception exception)
+        {
+            await _log.WarningAsync(
+                $"order reference could not be stamped on gateway transaction; order={order.Id}; transaction={transactionId}; " +
+                $"error_type={exception.GetType().Name}.", exception);
+        }
+    }
+
+    private async Task TryInsertNoteAsync(Order order, string note)
+    {
+        try
+        {
+            await _orderService.InsertOrderNoteAsync(new OrderNote
+            {
+                OrderId = order.Id,
+                Note = note,
+                DisplayToCustomer = false,
+                CreatedOnUtc = DateTime.UtcNow
+            });
+        }
+        catch (Exception exception)
+        {
+            await _log.WarningAsync($"order note could not be saved for order {order.Id}; error_type={exception.GetType().Name}.", exception);
+        }
     }
 
     public async Task<CapturePaymentResult> CaptureAsync(NmiSettings settings, CapturePaymentRequest request)
@@ -38,8 +103,11 @@ public class NmiOrderOperationService
 
         var rootId = request.Order.AuthorizationTransactionId;
         var amount = request.Order.OrderTotal;
+        var orderNumber = string.IsNullOrWhiteSpace(request.Order.CustomOrderNumber)
+            ? request.Order.Id.ToString()
+            : request.Order.CustomOrderNumber;
         var outcome = await ExecuteAsync(settings, request.Order, NmiTransactionTypes.Capture, rootId, amount,
-            () => _httpClient.CapturePaymentAsync(settings, rootId, amount));
+            () => _httpClient.CapturePaymentAsync(settings, rootId, amount, orderNumber));
         if (!outcome.Success)
             return new CapturePaymentResult { Errors = new List<string> { await OutcomeMessageAsync(outcome) } };
 

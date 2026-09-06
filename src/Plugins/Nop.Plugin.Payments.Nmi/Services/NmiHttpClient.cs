@@ -121,6 +121,7 @@ public partial class NmiHttpClient
         NmiSettings settings,
         string transactionId,
         decimal amount,
+        string orderId = null,
         CancellationToken cancellationToken = default)
     {
         ValidateTransactionId(transactionId);
@@ -128,8 +129,41 @@ public partial class NmiHttpClient
         {
             new KeyValuePair<string, string>("type", NmiTransactionTypes.Capture),
             new KeyValuePair<string, string>("transactionid", transactionId),
-            new KeyValuePair<string, string>("amount", NmiFormat.Amount(amount))
+            new KeyValuePair<string, string>("amount", NmiFormat.Amount(amount)),
+            new KeyValuePair<string, string>("orderid", SanitizeReference(orderId))
         }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Tags an existing transaction with merchant references (order description, PO number). The Payment API's
+    /// update request cannot change <c>orderid</c>, so the store order number travels in these fields instead.
+    /// </summary>
+    public Task<NmiApiResult<NmiTransactionResponse>> UpdateTransactionAsync(
+        NmiSettings settings,
+        string transactionId,
+        string orderDescription,
+        string purchaseOrderNumber,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateTransactionId(transactionId);
+        return SendTransactionAsync(settings, new[]
+        {
+            new KeyValuePair<string, string>("type", NmiTransactionTypes.Update),
+            new KeyValuePair<string, string>("transactionid", transactionId),
+            new KeyValuePair<string, string>("order_description", Truncate(orderDescription ?? string.Empty, 100)),
+            new KeyValuePair<string, string>("ponumber", SanitizeReference(purchaseOrderNumber))
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Keeps merchant references to a safe subset of characters and length for gateway text fields.
+    /// </summary>
+    internal static string SanitizeReference(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+        var cleaned = new string(value.Trim().Where(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.' or '#').ToArray());
+        return cleaned.Length == 0 ? null : Truncate(cleaned, 50);
     }
 
     public Task<NmiApiResult<NmiTransactionResponse>> VoidPaymentAsync(

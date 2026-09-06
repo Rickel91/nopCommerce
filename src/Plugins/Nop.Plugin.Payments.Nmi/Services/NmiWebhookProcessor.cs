@@ -228,6 +228,13 @@ public class NmiWebhookProcessor
             if (order?.PaymentMethodSystemName == NmiDefaults.SystemName)
                 return order;
         }
+        else if (!string.IsNullOrWhiteSpace(orderCorrelation) && orderCorrelation.Length <= 50)
+        {
+            // Captures carry the store order number as orderid, so events for them reference it instead of the GUID.
+            var order = await _orderService.GetOrderByCustomOrderNumberAsync(orderCorrelation.Trim());
+            if (order?.PaymentMethodSystemName == NmiDefaults.SystemName)
+                return order;
+        }
 
         return await _orderRepository.Table.FirstOrDefaultAsync(order =>
             order.PaymentMethodSystemName == NmiDefaults.SystemName &&
