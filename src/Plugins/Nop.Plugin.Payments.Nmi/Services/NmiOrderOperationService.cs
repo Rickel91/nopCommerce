@@ -148,6 +148,10 @@ public class NmiOrderOperationService
         var rootId = request.Order.CaptureTransactionId;
         var outcome = await ExecuteAsync(settings, request.Order, NmiTransactionTypes.Refund, rootId, request.AmountToRefund,
             () => _httpClient.RefundPaymentAsync(settings, rootId, request.AmountToRefund));
+
+        if (outcome.IsUnsettledTransaction)
+            return await RefundUnsettledAsync(settings, request, rootId, remainingAmount);
+
         if (!outcome.Success)
             return new RefundPaymentResult { Errors = new List<string> { await OutcomeMessageAsync(outcome) } };
 
@@ -157,6 +161,57 @@ public class NmiOrderOperationService
                 ? PaymentStatus.Refunded
                 : PaymentStatus.PartiallyRefunded
         };
+    }
+
+    /// <summary>
+    /// NMI cannot refund a sale before its batch settles ("Transaction is not settled"). A full-amount refund of an
+    /// untouched order is therefore executed as a void of the same transaction, which reverses it entirely. A partial
+    /// amount cannot be honoured by a void, so the admin is told to void the order or wait for settlement.
+    /// </summary>
+    private async Task<RefundPaymentResult> RefundUnsettledAsync(NmiSettings settings,
+        RefundPaymentRequest request,
+        string rootId,
+        decimal remainingAmount)
+    {
+        var order = request.Order;
+        var fullReversal = request.AmountToRefund == remainingAmount && order.RefundedAmount == 0;
+        if (!fullReversal)
+        {
+            await _log.WarningAsync(
+                $"refund of {NmiFormat.Amount(request.AmountToRefund)} for order {order.Id} rejected: transaction {rootId} " +
+                "has not settled and a partial amount cannot be reversed by a void. Admin was told to void the order or wait for settlement.");
+            return new RefundPaymentResult
+            {
+                Errors = new List<string>
+                {
+                    await ResourceOrDefaultAsync("Operations.UnsettledPartialRefund",
+                        "NMI has not settled this transaction yet, so a partial refund is not possible. Void the order to reverse the full amount, or refund after settlement.")
+                }
+            };
+        }
+
+        await _log.InformationAsync(
+            $"refund of {NmiFormat.Amount(request.AmountToRefund)} for order {order.Id} rejected because transaction {rootId} " +
+            "has not settled; issuing a void of the same transaction instead.");
+
+        var voidOutcome = await ExecuteAsync(settings, order, NmiTransactionTypes.Void, rootId, request.AmountToRefund,
+            () => _httpClient.VoidPaymentAsync(settings, rootId));
+        if (!voidOutcome.Success)
+            return new RefundPaymentResult { Errors = new List<string> { await OutcomeMessageAsync(voidOutcome) } };
+
+        await TryInsertNoteAsync(order,
+            $"NMI refund of {NmiFormat.Amount(request.AmountToRefund)} was not possible because transaction {rootId} had not settled; " +
+            "the transaction was voided instead, reversing the full amount.");
+        return new RefundPaymentResult { NewPaymentStatus = PaymentStatus.Voided };
+    }
+
+    private async Task<string> ResourceOrDefaultAsync(string name, string fallback)
+    {
+        var key = $"{NmiDefaults.LocaleResourcePrefix}.{name}";
+        var value = await _localizationService.GetResourceAsync(key);
+        return string.IsNullOrWhiteSpace(value) || string.Equals(value, key, StringComparison.OrdinalIgnoreCase)
+            ? fallback
+            : value;
     }
 
     private async Task<NmiOperationOutcome> ExecuteAsync(NmiSettings settings,
@@ -326,18 +381,28 @@ internal static class NmiOrderOperationMapper
         var response = apiResult.Value;
         var rootId = expectedRootId ?? response.TransactionId;
         if (response.IsDeclined)
-            return new(false, false, false, true, rootId, response.TransactionId, Diagnostic(response));
+            return new(false, false, false, true, rootId, response.TransactionId, Diagnostic(response), response.ResponseText);
         if (response.IsError)
             return new(false, false, response.IsAuthenticationFailure, false, rootId, response.TransactionId,
-                Diagnostic(response));
+                Diagnostic(response), response.ResponseText);
         if (!response.IsApproved || string.IsNullOrWhiteSpace(response.TransactionId))
             return NmiOperationOutcome.AmbiguousResult;
 
         var actionId = string.Equals(response.TransactionId, rootId, StringComparison.Ordinal)
             ? null
             : response.TransactionId;
-        return new(true, false, false, false, rootId, actionId, Diagnostic(response));
+        return new(true, false, false, false, rootId, actionId, Diagnostic(response), response.ResponseText);
     }
+
+    /// <summary>
+    /// True when the gateway rejected a refund because the sale has not settled yet (NMI: "Transaction is not settled").
+    /// Such a transaction can still be voided.
+    /// </summary>
+    public static bool IsUnsettledTransactionText(string responseText) =>
+        !string.IsNullOrWhiteSpace(responseText) &&
+        System.Text.RegularExpressions.Regex.IsMatch(responseText,
+            @"\b(not (yet |been )?settled|unsettled|pending settlement|has not settled)\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
     private static string Diagnostic(NmiTransactionResponse response) =>
         $"response={Safe(response.Response)}; response_code={Safe(response.ResponseCode)}; " +
@@ -356,8 +421,15 @@ internal record NmiOperationOutcome(bool Success,
     bool Declined,
     string RootTransactionId,
     string ActionId,
-    string Diagnostic)
+    string Diagnostic,
+    string ResponseText = null)
 {
     public static NmiOperationOutcome AmbiguousResult { get; } =
         new(false, true, false, false, null, null, "status=ambiguous");
+
+    /// <summary>
+    /// Definitive gateway rejection because the transaction has not settled (refund attempted before batch close).
+    /// </summary>
+    public bool IsUnsettledTransaction =>
+        !Success && !Ambiguous && !Unauthorized && NmiOrderOperationMapper.IsUnsettledTransactionText(ResponseText);
 }

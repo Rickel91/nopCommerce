@@ -4,6 +4,7 @@ using Nop.Core.Domain.Orders;
 using Nop.Core.Domain.Payments;
 using Nop.Plugin.Payments.Nmi.Services;
 using Nop.Plugin.Payments.Nmi.Services.Api;
+using Nop.Services.Payments;
 using Nop.Services.Security;
 using Xunit;
 
@@ -171,6 +172,104 @@ public class NmiOrderOperationTests
 
         Assert.False(outcome.Success);
         Assert.True(outcome.Ambiguous);
+    }
+
+    [Theory]
+    [InlineData("Transaction is not settled REFID:1", true)]
+    [InlineData("Refund amount may not exceed the transaction balance REFID:2", false)]
+    [InlineData("Transaction has not settled yet", true)]
+    [InlineData("Transaction already settled", false)]
+    [InlineData(null, false)]
+    public void UnsettledTransactionTextIsRecognised(string text, bool expected) =>
+        Assert.Equal(expected, NmiOrderOperationMapper.IsUnsettledTransactionText(text));
+
+    [Fact]
+    public async Task FullRefundOfUnsettledSaleFallsBackToVoidOfTheSameTransaction()
+    {
+        var handler = new ScriptedHandler(
+            "response=3&responsetext=Transaction+is+not+settled+REFID%3A1&authcode=&transactionid=&type=refund&response_code=300",
+            "response=1&responsetext=Transaction+Void+Successful&authcode=123456&transactionid=root-sale&type=void&response_code=100");
+        var (service, notes) = Service(handler);
+        var order = Order(PaymentStatus.Paid);
+        order.CaptureTransactionId = "root-sale";
+
+        var result = await service.RefundAsync(Settings(), new RefundPaymentRequest { Order = order, AmountToRefund = 25m });
+
+        Assert.True(result.Success);
+        Assert.Equal(PaymentStatus.Voided, result.NewPaymentStatus);
+        Assert.Collection(handler.Bodies,
+            body => Assert.Equal("security_key=private-key&type=refund&transactionid=root-sale&amount=25.00", body),
+            body => Assert.Equal("security_key=private-key&type=void&transactionid=root-sale", body));
+        Assert.Contains(notes, note => note.StartsWith("NMI void; amount=25.00; root_transaction=root-sale", StringComparison.Ordinal));
+        Assert.Contains(notes, note => note.Contains("voided instead", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task PartialRefundOfUnsettledSaleIsRefusedWithoutVoiding()
+    {
+        var handler = new ScriptedHandler(
+            "response=3&responsetext=Transaction+is+not+settled+REFID%3A1&authcode=&transactionid=&type=refund&response_code=300");
+        var (service, _) = Service(handler);
+        var order = Order(PaymentStatus.Paid);
+        order.CaptureTransactionId = "root-sale";
+
+        var result = await service.RefundAsync(Settings(), new RefundPaymentRequest { Order = order, AmountToRefund = 10m });
+
+        Assert.False(result.Success);
+        Assert.Single(handler.Bodies);
+        Assert.Equal("localized:Operations.UnsettledPartialRefund", Assert.Single(result.Errors));
+    }
+
+    [Fact]
+    public async Task OtherRefundErrorsDoNotTriggerAVoid()
+    {
+        var handler = new ScriptedHandler(
+            "response=3&responsetext=Refund+amount+may+not+exceed+the+transaction+balance+REFID%3A2&authcode=&transactionid=&type=refund&response_code=300");
+        var (service, _) = Service(handler);
+        var order = Order(PaymentStatus.Paid);
+        order.CaptureTransactionId = "root-sale";
+
+        var result = await service.RefundAsync(Settings(), new RefundPaymentRequest { Order = order, AmountToRefund = 25m });
+
+        Assert.False(result.Success);
+        Assert.Single(handler.Bodies);
+        Assert.Equal("localized:Operations.Failed", Assert.Single(result.Errors));
+    }
+
+    private static (NmiOrderOperationService Service, List<string> Notes) Service(HttpMessageHandler handler)
+    {
+        var notes = new List<string>();
+        var localization = TestInterfaceProxy.Create<Nop.Services.Localization.ILocalizationService>((method, args) =>
+            method.Name == nameof(Nop.Services.Localization.ILocalizationService.GetResourceAsync)
+                ? Task.FromResult("localized:" + ((string)args[0]).Replace(NmiDefaults.LocaleResourcePrefix + ".", string.Empty))
+                : throw new NotSupportedException(method.Name));
+        var orders = TestInterfaceProxy.Create<Nop.Services.Orders.IOrderService>((method, args) =>
+        {
+            if (method.Name != nameof(Nop.Services.Orders.IOrderService.InsertOrderNoteAsync))
+                throw new NotSupportedException(method.Name);
+            notes.Add(((OrderNote)args[0]).Note);
+            return Task.CompletedTask;
+        });
+        var stores = TestInterfaceProxy.Create<Nop.Services.Stores.IStoreService>((method, _) =>
+            throw new NotSupportedException(method.Name));
+        var service = new NmiOrderOperationService(Client(handler), localization, NmiLogger.None, orders, stores);
+        return (service, notes);
+    }
+
+    private sealed class ScriptedHandler : HttpMessageHandler
+    {
+        private readonly Queue<string> _responses;
+
+        public ScriptedHandler(params string[] responses) => _responses = new Queue<string>(responses);
+
+        public List<string> Bodies { get; } = new();
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Bodies.Add(await request.Content.ReadAsStringAsync(cancellationToken));
+            return await TextResponse(HttpStatusCode.OK, _responses.Count > 0 ? _responses.Dequeue() : "response=3&responsetext=unexpected+call");
+        }
     }
 
     [Fact]
