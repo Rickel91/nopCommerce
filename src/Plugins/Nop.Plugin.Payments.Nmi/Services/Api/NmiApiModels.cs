@@ -120,6 +120,12 @@ public sealed record NmiTransactionResponse
     public string Type { get; init; }
     public string ResponseCode { get; init; }
 
+    /// <summary>
+    /// Kount Omniscore (0-99, higher is safer) returned as <c>kount_score</c> when the Kount service is active on the
+    /// account. Null when Kount is not enabled. The Kount ID and decision are not part of the transaction response.
+    /// </summary>
+    public string KountScore { get; init; }
+
     public bool IsApproved => Response == "1";
     public bool IsDeclined => Response == "2";
     public bool IsError => Response == "3";
@@ -152,7 +158,8 @@ public sealed record NmiTransactionResponse
             CvvResponse = Get(fields, "cvvresponse"),
             OrderId = Get(fields, "orderid"),
             Type = Get(fields, "type"),
-            ResponseCode = Get(fields, "response_code")
+            ResponseCode = Get(fields, "response_code"),
+            KountScore = Get(fields, "kount_score")
         };
         return true;
     }
@@ -237,6 +244,25 @@ public static class NmiResponseCodes
         "" => null,
         _ => "unrecognised code"
     };
+
+    /// <summary>
+    /// Formats the Kount Omniscore as a <c>; kount_score=89.0 (safe)</c> suffix, or an empty string when Kount did not
+    /// score the transaction, so diagnostics stay unchanged for accounts without Kount.
+    /// </summary>
+    public static string FormatKount(string score)
+    {
+        var text = (score ?? string.Empty).Trim();
+        if (text.Length == 0)
+            return string.Empty;
+
+        var digits = new string(text.Where(c => char.IsAsciiDigit(c) || c == '.').ToArray());
+        if (!decimal.TryParse(digits, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var value))
+            return "; kount_score=unreadable";
+
+        // Kount's own bands: 0-29 high risk, 30-69 review, 70-99 safe.
+        var band = value >= 70 ? "safe" : value >= 30 ? "review" : "high risk";
+        return $"; kount_score={value.ToString("0.0", CultureInfo.InvariantCulture)} ({band})";
+    }
 
     public static string DescribeCvv(string code) => Normalize(code) switch
     {

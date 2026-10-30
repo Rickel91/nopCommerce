@@ -52,7 +52,8 @@ public static class NmiPaymentResultMapper
         $"response={Safe(response?.Response)}; response_code={Safe(response?.ResponseCode)}; " +
         $"response_text={Safe(Truncate(response?.ResponseText, 120))}; " +
         $"avs_result={NmiRedactor.Redact(NmiResponseCodes.Format(response?.AvsResponse, NmiResponseCodes.DescribeAvs))}; " +
-        $"cvv_result={NmiRedactor.Redact(NmiResponseCodes.Format(response?.CvvResponse, NmiResponseCodes.DescribeCvv))}";
+        $"cvv_result={NmiRedactor.Redact(NmiResponseCodes.Format(response?.CvvResponse, NmiResponseCodes.DescribeCvv))}" +
+        NmiResponseCodes.FormatKount(response?.KountScore);
 
     private static ProcessPaymentResult Failed(string message) => new() { Errors = new List<string> { message } };
 

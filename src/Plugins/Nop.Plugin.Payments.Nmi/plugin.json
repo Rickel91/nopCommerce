@@ -2,7 +2,7 @@
   "Group": "Payment methods",
   "FriendlyName": "NMI Payments",
   "SystemName": "Payments.Nmi",
-  "Version": "1.0.0",
+  "Version": "1.0.2",
   "SupportedVersions": [ "4.60" ],
   "Author": "Rickel91",
   "DisplayOrder": 1,

@@ -202,22 +202,49 @@ public class NmiOrderOperationTests
             body => Assert.Equal("security_key=private-key&type=void&transactionid=root-sale", body));
         Assert.Contains(notes, note => note.StartsWith("NMI void; amount=25.00; root_transaction=root-sale", StringComparison.Ordinal));
         Assert.Contains(notes, note => note.Contains("voided instead", StringComparison.Ordinal));
+        // nop adds AmountToRefund (25) afterwards, so the order must end at the full 25 total.
+        Assert.Equal(0m, order.RefundedAmount);
     }
 
     [Fact]
-    public async Task PartialRefundOfUnsettledSaleIsRefusedWithoutVoiding()
+    public async Task PartialRefundOfUnsettledSaleVoidsTheWholeTransaction()
     {
         var handler = new ScriptedHandler(
-            "response=3&responsetext=Transaction+is+not+settled+REFID%3A1&authcode=&transactionid=&type=refund&response_code=300");
-        var (service, _) = Service(handler);
+            "response=3&responsetext=Transaction+is+not+settled+REFID%3A1&authcode=&transactionid=&type=refund&response_code=300",
+            "response=1&responsetext=Transaction+Void+Successful&authcode=123456&transactionid=root-sale&type=void&response_code=100");
+        var (service, notes) = Service(handler);
         var order = Order(PaymentStatus.Paid);
         order.CaptureTransactionId = "root-sale";
 
         var result = await service.RefundAsync(Settings(), new RefundPaymentRequest { Order = order, AmountToRefund = 10m });
 
+        Assert.True(result.Success);
+        Assert.Equal(PaymentStatus.Voided, result.NewPaymentStatus);
+        Assert.Collection(handler.Bodies,
+            body => Assert.Equal("security_key=private-key&type=refund&transactionid=root-sale&amount=10.00", body),
+            body => Assert.Equal("security_key=private-key&type=void&transactionid=root-sale", body));
+        // The void reversed the whole 25; nop will add the requested 10 afterwards, so pre-adjust to 15.
+        Assert.Equal(15m, order.RefundedAmount);
+        Assert.Contains(notes, note => note.StartsWith("NMI void; amount=25.00; root_transaction=root-sale", StringComparison.Ordinal));
+        Assert.Contains(notes, note => note.Contains("reversed the full remaining 25.00", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task FailedVoidAfterUnsettledRefundLeavesOrderUntouched()
+    {
+        var handler = new ScriptedHandler(
+            "response=3&responsetext=Transaction+is+not+settled+REFID%3A1&authcode=&transactionid=&type=refund&response_code=300",
+            "response=3&responsetext=Transaction+already+voided&authcode=&transactionid=&type=void&response_code=300");
+        var (service, _) = Service(handler);
+        var order = Order(PaymentStatus.Paid);
+        order.CaptureTransactionId = "root-sale";
+
+        var result = await service.RefundAsync(Settings(), new RefundPaymentRequest { Order = order, AmountToRefund = 25m });
+
         Assert.False(result.Success);
-        Assert.Single(handler.Bodies);
-        Assert.Equal("localized:Operations.UnsettledPartialRefund", Assert.Single(result.Errors));
+        Assert.Equal(2, handler.Bodies.Count);
+        Assert.Equal(0m, order.RefundedAmount);
+        Assert.Equal("localized:Operations.Failed", Assert.Single(result.Errors));
     }
 
     [Fact]

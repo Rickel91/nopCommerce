@@ -164,9 +164,10 @@ public class NmiOrderOperationService
     }
 
     /// <summary>
-    /// NMI cannot refund a sale before its batch settles ("Transaction is not settled"). A full-amount refund of an
-    /// untouched order is therefore executed as a void of the same transaction, which reverses it entirely. A partial
-    /// amount cannot be honoured by a void, so the admin is told to void the order or wait for settlement.
+    /// NMI cannot refund a sale before its batch settles ("Transaction is not settled"), and nopCommerce offers the
+    /// Void action only on Authorized orders, so a Paid sale inside the batch window can only be reversed through the
+    /// Refund action. Any refund request that hits an unsettled transaction is therefore executed as a void of the
+    /// whole transaction, whatever amount was requested: a void cannot be partial.
     /// </summary>
     private async Task<RefundPaymentResult> RefundUnsettledAsync(NmiSettings settings,
         RefundPaymentRequest request,
@@ -174,44 +175,27 @@ public class NmiOrderOperationService
         decimal remainingAmount)
     {
         var order = request.Order;
-        var fullReversal = request.AmountToRefund == remainingAmount && order.RefundedAmount == 0;
-        if (!fullReversal)
-        {
-            await _log.WarningAsync(
-                $"refund of {NmiFormat.Amount(request.AmountToRefund)} for order {order.Id} rejected: transaction {rootId} " +
-                "has not settled and a partial amount cannot be reversed by a void. Admin was told to void the order or wait for settlement.");
-            return new RefundPaymentResult
-            {
-                Errors = new List<string>
-                {
-                    await ResourceOrDefaultAsync("Operations.UnsettledPartialRefund",
-                        "NMI has not settled this transaction yet, so a partial refund is not possible. Void the order to reverse the full amount, or refund after settlement.")
-                }
-            };
-        }
-
+        var requested = NmiFormat.Amount(request.AmountToRefund);
+        var reversed = NmiFormat.Amount(remainingAmount);
         await _log.InformationAsync(
-            $"refund of {NmiFormat.Amount(request.AmountToRefund)} for order {order.Id} rejected because transaction {rootId} " +
-            "has not settled; issuing a void of the same transaction instead.");
+            $"refund of {requested} for order {order.Id} rejected because transaction {rootId} has not settled; " +
+            $"voiding the whole transaction instead (reverses {reversed}).");
 
-        var voidOutcome = await ExecuteAsync(settings, order, NmiTransactionTypes.Void, rootId, request.AmountToRefund,
+        var voidOutcome = await ExecuteAsync(settings, order, NmiTransactionTypes.Void, rootId, remainingAmount,
             () => _httpClient.VoidPaymentAsync(settings, rootId));
         if (!voidOutcome.Success)
             return new RefundPaymentResult { Errors = new List<string> { await OutcomeMessageAsync(voidOutcome) } };
 
-        await TryInsertNoteAsync(order,
-            $"NMI refund of {NmiFormat.Amount(request.AmountToRefund)} was not possible because transaction {rootId} had not settled; " +
-            "the transaction was voided instead, reversing the full amount.");
-        return new RefundPaymentResult { NewPaymentStatus = PaymentStatus.Voided };
-    }
+        // nop records RefundedAmount += AmountToRefund after a successful result. The void reversed the entire
+        // remaining balance, so pre-adjust the order so that sum lands on the full total and the order reads as such.
+        order.RefundedAmount = order.OrderTotal - request.AmountToRefund;
 
-    private async Task<string> ResourceOrDefaultAsync(string name, string fallback)
-    {
-        var key = $"{NmiDefaults.LocaleResourcePrefix}.{name}";
-        var value = await _localizationService.GetResourceAsync(key);
-        return string.IsNullOrWhiteSpace(value) || string.Equals(value, key, StringComparison.OrdinalIgnoreCase)
-            ? fallback
-            : value;
+        await TryInsertNoteAsync(order,
+            request.AmountToRefund == remainingAmount
+                ? $"NMI refund of {requested} was not possible because transaction {rootId} had not settled; the transaction was voided instead."
+                : $"NMI partial refund of {requested} was not possible because transaction {rootId} had not settled; " +
+                  $"the transaction was voided instead, which reversed the full remaining {reversed}.");
+        return new RefundPaymentResult { NewPaymentStatus = PaymentStatus.Voided };
     }
 
     private async Task<NmiOperationOutcome> ExecuteAsync(NmiSettings settings,
@@ -406,7 +390,8 @@ internal static class NmiOrderOperationMapper
 
     private static string Diagnostic(NmiTransactionResponse response) =>
         $"response={Safe(response.Response)}; response_code={Safe(response.ResponseCode)}; " +
-        $"response_text={Safe(Truncate(response.ResponseText, 120))}";
+        $"response_text={Safe(Truncate(response.ResponseText, 120))}" +
+        NmiResponseCodes.FormatKount(response.KountScore);
 
     private static string Truncate(string value, int maxLength) =>
         string.IsNullOrEmpty(value) || value.Length <= maxLength ? value : value[..maxLength];

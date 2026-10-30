@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using Nop.Core;
 using Nop.Core.Domain.Common;
 using Nop.Core.Domain.Customers;
@@ -60,7 +60,7 @@ public class NmiPaymentRequestBuilder
         var billingAddress = await _customerService.GetCustomerBillingAddressAsync(customer);
         var shippingAddress = await _customerService.GetCustomerShippingAddressAsync(customer);
         var store = await _storeService.GetStoreByIdAsync(paymentRequest.StoreId);
-        var orderId = paymentRequest.OrderGuid.ToString("N");
+        var orderId = paymentRequest.OrderGuid.ToString().Trim();
 
         return new NmiPaymentRequest
         {

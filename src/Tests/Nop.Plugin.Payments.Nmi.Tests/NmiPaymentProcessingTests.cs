@@ -49,6 +49,24 @@ public class NmiPaymentProcessingTests
     }
 
     [Fact]
+    public void KountScoreIsParsedAndCarriedIntoTheDiagnosticOnlyWhenPresent()
+    {
+        Assert.True(NmiTransactionResponse.TryParse(
+            "response=1&responsetext=SUCCESS&authcode=123456&transactionid=txn-123&type=sale&response_code=100&kount_score=89.0",
+            out var scored));
+        Assert.Equal("89.0", scored.KountScore);
+
+        var result = NmiPaymentResultMapper.Map(new(scored, null, 200), NmiTransactionMode.AuthorizeAndCapture, Messages);
+        Assert.EndsWith("; kount_score=89.0 (safe)", result.CaptureTransactionResult);
+
+        Assert.DoesNotContain("kount", NmiPaymentResultMapper.BuildDiagnostic(ApprovedResponse()), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("; kount_score=25.0 (high risk)", NmiResponseCodes.FormatKount("25"));
+        Assert.Equal("; kount_score=55.5 (review)", NmiResponseCodes.FormatKount(" 55.5 "));
+        Assert.Equal("; kount_score=unreadable", NmiResponseCodes.FormatKount("n/a"));
+        Assert.Equal(string.Empty, NmiResponseCodes.FormatKount(null));
+    }
+
+    [Fact]
     public void DeclineNeverMapsToPaidOrAuthorized()
     {
         var response = ApprovedResponse() with { Response = "2", ResponseCode = "200", ResponseText = "DECLINE" };

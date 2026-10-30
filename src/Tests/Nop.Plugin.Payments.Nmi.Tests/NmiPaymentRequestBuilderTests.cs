@@ -43,8 +43,8 @@ public class NmiPaymentRequestBuilderTests
         Assert.Equal("single-use-token", actual.PaymentToken);
         Assert.Equal("processor-one", actual.ProcessorId);
         Assert.Equal(90, actual.DuplicateCheckSeconds);
-        Assert.Equal(orderGuid.ToString("N"), actual.OrderId);
-        Assert.Equal($"Store Seven order {orderGuid:N}", actual.OrderDescription);
+        Assert.Equal(orderGuid.ToString(), actual.OrderId);
+        Assert.Equal($"Store Seven order {orderGuid}", actual.OrderDescription);
         Assert.Equal("192.0.2.44", actual.IpAddress);
         Assert.Null(actual.BillingAddress);
         Assert.Null(actual.ShippingAddress);

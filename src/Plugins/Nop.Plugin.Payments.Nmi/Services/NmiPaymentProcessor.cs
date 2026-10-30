@@ -53,7 +53,7 @@ public class NmiPaymentProcessor
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(paymentRequest);
 
-        var correlation = paymentRequest.OrderGuid.ToString("N");
+        var correlation = paymentRequest.OrderGuid.ToString().Trim();
         var messages = await GetMessagesAsync();
 
         var customer = await _customerService.GetCustomerByIdAsync(paymentRequest.CustomerId);

@@ -293,9 +293,7 @@ public class NmiPaymentMethod : BasePlugin, IPaymentMethod
             [$"{NmiDefaults.LocaleResourcePrefix}.Operations.Unauthorized"] =
                 "NMI rejected the configured API credentials.",
             [$"{NmiDefaults.LocaleResourcePrefix}.Operations.Ambiguous"] =
-                "The NMI result could not be confirmed. Do not retry this operation until the transaction is reconciled.",
-            [$"{NmiDefaults.LocaleResourcePrefix}.Operations.UnsettledPartialRefund"] =
-                "NMI has not settled this transaction yet, so a partial refund is not possible. Void the order to reverse the full amount, or refund after settlement."
+                "The NMI result could not be confirmed. Do not retry this operation until the transaction is reconciled."
         });
 
         await _settingService.SaveSettingAsync(new NmiSettings());
