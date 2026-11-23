@@ -67,6 +67,41 @@ public class NmiPaymentProcessingTests
     }
 
     [Fact]
+    public void KountScoreIsRecoveredFromTheOrderTransactionResult()
+    {
+        Assert.True(NmiTransactionResponse.TryParse(
+            "response=1&responsetext=SUCCESS&authcode=123456&transactionid=txn-123&type=sale&response_code=100&kount_score=89",
+            out var scored));
+
+        // Sale: nopCommerce copies the mapped diagnostic onto the order as the capture result.
+        var sale = NmiPaymentResultMapper.Map(new(scored, null, 200), NmiTransactionMode.AuthorizeAndCapture, Messages);
+        var paidOrder = new Nop.Core.Domain.Orders.Order { CaptureTransactionResult = sale.CaptureTransactionResult };
+        Assert.True(Nop.Plugin.Payments.Nmi.Infrastructure.NmiOrderPlacedEventConsumer.TryGetKountScore(paidOrder, out var saleScore));
+        Assert.Equal(89m, saleScore);
+        Assert.Equal("89.0", NmiResponseCodes.FormatKountScore(saleScore));
+        Assert.Equal("safe", NmiResponseCodes.DescribeKountBand(saleScore));
+        Assert.Equal("Kount score: 89.0 (safe)", Nop.Plugin.Payments.Nmi.Infrastructure.NmiOrderPlacedEventConsumer.BuildKountNote(saleScore));
+
+        // Authorize-only: the diagnostic is on the authorization result instead.
+        var auth = NmiPaymentResultMapper.Map(new(scored, null, 200), NmiTransactionMode.Authorize, Messages);
+        var authorizedOrder = new Nop.Core.Domain.Orders.Order { AuthorizationTransactionResult = auth.AuthorizationTransactionResult };
+        Assert.True(Nop.Plugin.Payments.Nmi.Infrastructure.NmiOrderPlacedEventConsumer.TryGetKountScore(authorizedOrder, out var authScore));
+        Assert.Equal(89m, authScore);
+
+        // No Kount on the account, an unreadable score, or no order: nothing to store.
+        var unscored = new Nop.Core.Domain.Orders.Order { CaptureTransactionResult = NmiPaymentResultMapper.BuildDiagnostic(ApprovedResponse()) };
+        Assert.False(Nop.Plugin.Payments.Nmi.Infrastructure.NmiOrderPlacedEventConsumer.TryGetKountScore(unscored, out _));
+        Assert.False(NmiResponseCodes.TryReadKountScore("response=1; cvv_result=M (match); kount_score=unreadable", out _));
+        Assert.False(NmiResponseCodes.TryReadKountScore("response_text=not_a_kount_score=12", out _));
+        Assert.False(Nop.Plugin.Payments.Nmi.Infrastructure.NmiOrderPlacedEventConsumer.TryGetKountScore(null, out _));
+
+        Assert.True(NmiResponseCodes.TryReadKountScore("response=1; kount_score=25.5 (high risk)", out var low));
+        Assert.Equal(25.5m, low);
+        Assert.Equal("high risk", NmiResponseCodes.DescribeKountBand(low));
+        Assert.Equal("review", NmiResponseCodes.DescribeKountBand(30m));
+    }
+
+    [Fact]
     public void DeclineNeverMapsToPaidOrAuthorized()
     {
         var response = ApprovedResponse() with { Response = "2", ResponseCode = "200", ResponseText = "DECLINE" };

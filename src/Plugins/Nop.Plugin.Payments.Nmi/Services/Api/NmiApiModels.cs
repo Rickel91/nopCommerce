@@ -251,17 +251,52 @@ public static class NmiResponseCodes
     /// </summary>
     public static string FormatKount(string score)
     {
-        var text = (score ?? string.Empty).Trim();
-        if (text.Length == 0)
+        if (string.IsNullOrWhiteSpace(score))
             return string.Empty;
 
-        var digits = new string(text.Where(c => char.IsAsciiDigit(c) || c == '.').ToArray());
-        if (!decimal.TryParse(digits, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var value))
-            return "; kount_score=unreadable";
+        return TryParseKountScore(score, out var value)
+            ? $"; kount_score={FormatKountScore(value)} ({DescribeKountBand(value)})"
+            : "; kount_score=unreadable";
+    }
 
-        // Kount's own bands: 0-29 high risk, 30-69 review, 70-99 safe.
-        var band = value >= 70 ? "safe" : value >= 30 ? "review" : "high risk";
-        return $"; kount_score={value.ToString("0.0", CultureInfo.InvariantCulture)} ({band})";
+    /// <summary>
+    /// Reads a raw <c>kount_score</c> gateway value as a number. False when the value is missing or not numeric.
+    /// </summary>
+    public static bool TryParseKountScore(string score, out decimal value)
+    {
+        value = 0;
+        var text = (score ?? string.Empty).Trim();
+        if (text.Length == 0)
+            return false;
+
+        var digits = new string(text.Where(c => char.IsAsciiDigit(c) || c == '.').ToArray());
+        return decimal.TryParse(digits, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out value);
+    }
+
+    /// <summary>
+    /// Culture-invariant, one-decimal form of the score, used in diagnostics and in the order attribute.
+    /// </summary>
+    public static string FormatKountScore(decimal value) => value.ToString("0.0", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Kount's own bands: 0-29 high risk, 30-69 review, 70-99 safe.
+    /// </summary>
+    public static string DescribeKountBand(decimal value) => value >= 70 ? "safe" : value >= 30 ? "review" : "high risk";
+
+    /// <summary>
+    /// Recovers the Kount score from a transaction diagnostic written by <see cref="FormatKount"/> (the text nopCommerce
+    /// stores as the order's capture or authorization result). The order does not exist yet when the gateway answers,
+    /// so the order-placed handler reads the score back from there. False when the diagnostic carries no readable score.
+    /// </summary>
+    public static bool TryReadKountScore(string diagnostic, out decimal value)
+    {
+        value = 0;
+        if (string.IsNullOrEmpty(diagnostic))
+            return false;
+
+        var match = System.Text.RegularExpressions.Regex.Match(diagnostic, @"(?:^|;\s*)kount_score=(\d{1,3}(?:\.\d+)?)(?:\s|;|$)");
+        return match.Success &&
+               decimal.TryParse(match.Groups[1].Value, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out value);
     }
 
     public static string DescribeCvv(string code) => Normalize(code) switch

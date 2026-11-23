@@ -149,42 +149,55 @@ public class NmiOrderOperationService
         var outcome = await ExecuteAsync(settings, request.Order, NmiTransactionTypes.Refund, rootId, request.AmountToRefund,
             () => _httpClient.RefundPaymentAsync(settings, rootId, request.AmountToRefund));
 
-        if (outcome.IsUnsettledTransaction)
-            return await RefundUnsettledAsync(settings, request, rootId, remainingAmount);
-
-        if (!outcome.Success)
-            return new RefundPaymentResult { Errors = new List<string> { await OutcomeMessageAsync(outcome) } };
-
-        return new RefundPaymentResult
+        if (outcome.Success)
         {
-            NewPaymentStatus = request.AmountToRefund == remainingAmount
-                ? PaymentStatus.Refunded
-                : PaymentStatus.PartiallyRefunded
-        };
+            return new RefundPaymentResult
+            {
+                NewPaymentStatus = request.AmountToRefund == remainingAmount
+                    ? PaymentStatus.Refunded
+                    : PaymentStatus.PartiallyRefunded
+            };
+        }
+
+        // A sale that has never been refunded may simply not have settled yet. The gateway's wording for that
+        // rejection is not dependable, so every definitive rejection of such a refund is followed by a void attempt.
+        if (outcome.IsGatewayRejection && request.Order.PaymentStatus == PaymentStatus.Paid && request.Order.RefundedAmount == 0)
+            return await VoidRejectedRefundAsync(settings, request, rootId, remainingAmount, outcome);
+
+        return new RefundPaymentResult { Errors = new List<string> { await OutcomeMessageAsync(outcome) } };
     }
 
     /// <summary>
-    /// NMI cannot refund a sale before its batch settles ("Transaction is not settled"), and nopCommerce offers the
-    /// Void action only on Authorized orders, so a Paid sale inside the batch window can only be reversed through the
-    /// Refund action. Any refund request that hits an unsettled transaction is therefore executed as a void of the
-    /// whole transaction, whatever amount was requested: a void cannot be partial.
+    /// NMI cannot refund a sale before its batch settles, and nopCommerce offers the Void action only on Authorized
+    /// orders, so a Paid sale inside the batch window can only be reversed through the Refund action. A rejected
+    /// refund of a never-refunded sale is therefore retried as a void of the whole transaction, whatever amount was
+    /// requested: a void cannot be partial. The gateway refuses to void a settled transaction, so when the refund
+    /// was rejected for another reason the void fails too, nothing changes, and the refund's own error is reported.
     /// </summary>
-    private async Task<RefundPaymentResult> RefundUnsettledAsync(NmiSettings settings,
+    private async Task<RefundPaymentResult> VoidRejectedRefundAsync(NmiSettings settings,
         RefundPaymentRequest request,
         string rootId,
-        decimal remainingAmount)
+        decimal remainingAmount,
+        NmiOperationOutcome refundOutcome)
     {
         var order = request.Order;
         var requested = NmiFormat.Amount(request.AmountToRefund);
         var reversed = NmiFormat.Amount(remainingAmount);
         await _log.InformationAsync(
-            $"refund of {requested} for order {order.Id} rejected because transaction {rootId} has not settled; " +
-            $"voiding the whole transaction instead (reverses {reversed}).");
+            $"refund of {requested} for order {order.Id} was rejected by the gateway ({refundOutcome.Diagnostic}); " +
+            $"transaction {rootId} may not have settled, attempting to void the whole transaction instead (would reverse {reversed}).");
 
         var voidOutcome = await ExecuteAsync(settings, order, NmiTransactionTypes.Void, rootId, remainingAmount,
             () => _httpClient.VoidPaymentAsync(settings, rootId));
         if (!voidOutcome.Success)
-            return new RefundPaymentResult { Errors = new List<string> { await OutcomeMessageAsync(voidOutcome) } };
+        {
+            // An ambiguous void must be reconciled by hand; otherwise the refund rejection is the real answer.
+            var reported = voidOutcome.Ambiguous || refundOutcome.IsUnsettledTransaction ? voidOutcome : refundOutcome;
+            await _log.WarningAsync(
+                $"refund of {requested} for order {order.Id} was rejected and transaction {rootId} could not be voided either; " +
+                $"refund_result={refundOutcome.Diagnostic}; void_result={voidOutcome.Diagnostic}.");
+            return new RefundPaymentResult { Errors = new List<string> { await OutcomeMessageAsync(reported) } };
+        }
 
         // nop records RefundedAmount += AmountToRefund after a successful result. The void reversed the entire
         // remaining balance, so pre-adjust the order so that sum lands on the full total and the order reads as such.
@@ -365,10 +378,10 @@ internal static class NmiOrderOperationMapper
         var response = apiResult.Value;
         var rootId = expectedRootId ?? response.TransactionId;
         if (response.IsDeclined)
-            return new(false, false, false, true, rootId, response.TransactionId, Diagnostic(response), response.ResponseText);
+            return new(false, false, false, true, rootId, response.TransactionId, Diagnostic(response), response.ResponseText ?? string.Empty);
         if (response.IsError)
             return new(false, false, response.IsAuthenticationFailure, false, rootId, response.TransactionId,
-                Diagnostic(response), response.ResponseText);
+                Diagnostic(response), response.ResponseText ?? string.Empty);
         if (!response.IsApproved || string.IsNullOrWhiteSpace(response.TransactionId))
             return NmiOperationOutcome.AmbiguousResult;
 
@@ -411,6 +424,12 @@ internal record NmiOperationOutcome(bool Success,
 {
     public static NmiOperationOutcome AmbiguousResult { get; } =
         new(false, true, false, false, null, null, "status=ambiguous");
+
+    /// <summary>
+    /// The gateway itself answered and refused the request (declined or error), as opposed to a transport or HTTP
+    /// failure, a rejected security key, or an outcome that could not be determined.
+    /// </summary>
+    public bool IsGatewayRejection => !Success && !Ambiguous && !Unauthorized && ResponseText is not null;
 
     /// <summary>
     /// Definitive gateway rejection because the transaction has not settled (refund attempted before batch close).

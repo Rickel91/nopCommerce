@@ -248,10 +248,90 @@ public class NmiOrderOperationTests
     }
 
     [Fact]
-    public async Task OtherRefundErrorsDoNotTriggerAVoid()
+    public async Task RefundRejectedWithAnyGatewayWordingVoidsTheUnsettledSale()
+    {
+        // Live gateways do not always say "not settled"; the void is attempted whatever the rejection text is.
+        var handler = new ScriptedHandler(
+            "response=3&responsetext=Refund+amount+may+not+exceed+the+transaction+balance+REFID%3A2&authcode=&transactionid=&type=refund&response_code=300",
+            "response=1&responsetext=Transaction+Void+Successful&authcode=123456&transactionid=root-sale&type=void&response_code=100");
+        var (service, notes) = Service(handler);
+        var order = Order(PaymentStatus.Paid);
+        order.CaptureTransactionId = "root-sale";
+
+        var result = await service.RefundAsync(Settings(), new RefundPaymentRequest { Order = order, AmountToRefund = 25m });
+
+        Assert.True(result.Success);
+        Assert.Equal(PaymentStatus.Voided, result.NewPaymentStatus);
+        Assert.Collection(handler.Bodies,
+            body => Assert.Equal("security_key=private-key&type=refund&transactionid=root-sale&amount=25.00", body),
+            body => Assert.Equal("security_key=private-key&type=void&transactionid=root-sale", body));
+        Assert.Contains(notes, note => note.Contains("voided instead", StringComparison.Ordinal));
+        Assert.Equal(0m, order.RefundedAmount);
+    }
+
+    [Theory]
+    [InlineData("response=3&responsetext=Refund+amount+may+not+exceed+the+transaction+balance+REFID%3A2&authcode=&transactionid=&type=refund&response_code=300", "Operations.Failed")]
+    [InlineData("response=2&responsetext=DECLINE&authcode=&transactionid=refund-9&type=refund&response_code=200", "Operations.Declined")]
+    public async Task RejectedRefundOfSettledSaleReportsTheRefundError(string refundResponse, string expectedError)
+    {
+        // The gateway refuses to void a settled transaction, so the order is untouched and the refund error stands.
+        var handler = new ScriptedHandler(
+            refundResponse,
+            "response=3&responsetext=Only+transactions+pending+settlement+can+be+voided+REFID%3A3&authcode=&transactionid=&type=void&response_code=300");
+        var (service, notes) = Service(handler);
+        var order = Order(PaymentStatus.Paid);
+        order.CaptureTransactionId = "root-sale";
+
+        var result = await service.RefundAsync(Settings(), new RefundPaymentRequest { Order = order, AmountToRefund = 10m });
+
+        Assert.False(result.Success);
+        Assert.Equal(2, handler.Bodies.Count);
+        Assert.Equal(0m, order.RefundedAmount);
+        Assert.Empty(notes);
+        Assert.Equal("localized:" + expectedError, Assert.Single(result.Errors));
+    }
+
+    [Fact]
+    public async Task AmbiguousVoidAfterRejectedRefundIsReportedAsAmbiguous()
     {
         var handler = new ScriptedHandler(
+            "response=3&responsetext=Refund+amount+may+not+exceed+the+transaction+balance+REFID%3A2&authcode=&transactionid=&type=refund&response_code=300",
+            "response=1&responsetext=Transaction+Void+Successful&authcode=&transactionid=&type=void&response_code=100");
+        var (service, _) = Service(handler);
+        var order = Order(PaymentStatus.Paid);
+        order.CaptureTransactionId = "root-sale";
+
+        var result = await service.RefundAsync(Settings(), new RefundPaymentRequest { Order = order, AmountToRefund = 25m });
+
+        Assert.False(result.Success);
+        Assert.Equal(0m, order.RefundedAmount);
+        Assert.Equal("localized:Operations.Ambiguous", Assert.Single(result.Errors));
+    }
+
+    [Fact]
+    public async Task RejectedRefundOfAlreadyPartiallyRefundedSaleNeverVoids()
+    {
+        // An earlier refund succeeded, so the sale has settled and a void could not be the right reversal.
+        var handler = new ScriptedHandler(
             "response=3&responsetext=Refund+amount+may+not+exceed+the+transaction+balance+REFID%3A2&authcode=&transactionid=&type=refund&response_code=300");
+        var (service, _) = Service(handler);
+        var order = Order(PaymentStatus.PartiallyRefunded);
+        order.CaptureTransactionId = "root-sale";
+        order.RefundedAmount = 5m;
+
+        var result = await service.RefundAsync(Settings(), new RefundPaymentRequest { Order = order, AmountToRefund = 10m });
+
+        Assert.False(result.Success);
+        Assert.Single(handler.Bodies);
+        Assert.Equal(5m, order.RefundedAmount);
+        Assert.Equal("localized:Operations.Failed", Assert.Single(result.Errors));
+    }
+
+    [Fact]
+    public async Task RefundRejectedForAuthenticationNeverVoids()
+    {
+        var handler = new ScriptedHandler(
+            "response=3&responsetext=Authentication+Failed&authcode=&transactionid=&type=refund&response_code=300");
         var (service, _) = Service(handler);
         var order = Order(PaymentStatus.Paid);
         order.CaptureTransactionId = "root-sale";
@@ -260,7 +340,7 @@ public class NmiOrderOperationTests
 
         Assert.False(result.Success);
         Assert.Single(handler.Bodies);
-        Assert.Equal("localized:Operations.Failed", Assert.Single(result.Errors));
+        Assert.Equal("localized:Operations.Unauthorized", Assert.Single(result.Errors));
     }
 
     private static (NmiOrderOperationService Service, List<string> Notes) Service(HttpMessageHandler handler)

@@ -34,6 +34,18 @@ public static class NmiDefaults
     public const string PaymentTokenAttribute = "Nmi.PaymentToken";
 
     /// <summary>
+    /// Order generic attribute holding the Kount Omniscore of the sale or authorization as a culture-invariant
+    /// number with one decimal (for example <c>89.0</c>). Absent when Kount did not score the transaction.
+    /// </summary>
+    public const string KountScoreAttribute = "Nmi.KountScore";
+
+    /// <summary>
+    /// Order generic attribute holding Kount's risk band for <see cref="KountScoreAttribute"/>:
+    /// <c>safe</c>, <c>review</c> or <c>high risk</c>.
+    /// </summary>
+    public const string KountBandAttribute = "Nmi.KountBand";
+
+    /// <summary>
     /// Session key nopCommerce 4.60 uses to hold the checkout <c>ProcessPaymentRequest</c> between the
     /// payment-info step and order placement. Cleared once the single-use token has been sent to NMI.
     /// </summary>
