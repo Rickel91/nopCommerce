@@ -1,10 +1,12 @@
 using Microsoft.AspNetCore.Http;
 using Nop.Core;
+using Nop.Core.Domain.Cms;
 using Nop.Core.Domain.Orders;
 using Nop.Core.Domain.Payments;
 using Nop.Core.Domain.ScheduleTasks;
 using Nop.Plugin.Payments.Nmi.Components;
 using Nop.Plugin.Payments.Nmi.Services;
+using Nop.Services.Cms;
 using Nop.Services.Common;
 using Nop.Services.Configuration;
 using Nop.Services.Localization;
@@ -12,13 +14,14 @@ using Nop.Services.Orders;
 using Nop.Services.Payments;
 using Nop.Services.Plugins;
 using Nop.Services.ScheduleTasks;
+using Nop.Web.Framework.Infrastructure;
 
 namespace Nop.Plugin.Payments.Nmi;
 
 /// <summary>
 /// Represents the NMI payment method (Collect.js tokenization + Payment API).
 /// </summary>
-public class NmiPaymentMethod : BasePlugin, IPaymentMethod
+public class NmiPaymentMethod : BasePlugin, IPaymentMethod, IWidgetPlugin
 {
     private readonly IGenericAttributeService _genericAttributeService;
     private readonly ILocalizationService _localizationService;
@@ -297,6 +300,7 @@ public class NmiPaymentMethod : BasePlugin, IPaymentMethod
         });
 
         await _settingService.SaveSettingAsync(new NmiSettings());
+        await EnsureOrderWidgetAsync();
 
         if (await _scheduleTaskService.GetTaskByTypeAsync(NmiDefaults.WebhookCleanupTaskType) is null)
         {
@@ -313,9 +317,56 @@ public class NmiPaymentMethod : BasePlugin, IPaymentMethod
         await base.InstallAsync();
     }
 
+    /// <summary>
+    /// Stores that upgrade from a version without the order-page widget get it switched on here.
+    /// </summary>
+    public override async Task UpdateAsync(string currentVersion, string targetVersion)
+    {
+        await EnsureOrderWidgetAsync();
+        await base.UpdateAsync(currentVersion, targetVersion);
+    }
+
+    /// <summary>
+    /// Activates the plugin as a widget (nopCommerce only renders active widgets) and adds the texts of the Kount
+    /// score row on the admin order page. Safe to run repeatedly.
+    /// </summary>
+    private async Task EnsureOrderWidgetAsync()
+    {
+        var widgetSettings = await _settingService.LoadSettingAsync<WidgetSettings>();
+        if (!widgetSettings.ActiveWidgetSystemNames.Contains(NmiDefaults.SystemName))
+        {
+            widgetSettings.ActiveWidgetSystemNames.Add(NmiDefaults.SystemName);
+            await _settingService.SaveSettingAsync(widgetSettings);
+        }
+
+        await _localizationService.AddOrUpdateLocaleResourceAsync(new Dictionary<string, string>
+        {
+            [$"{NmiDefaults.LocaleResourcePrefix}.Order.KountScore"] = "Kount score",
+            [$"{NmiDefaults.LocaleResourcePrefix}.Order.KountScore.Hint"] =
+                "Kount Omniscore returned by the NMI gateway for this payment: 0-29 high risk, 30-69 review, 70-99 safe.",
+            [$"{NmiDefaults.LocaleResourcePrefix}.Order.KountScore.NotReturned"] = "Not returned by the gateway"
+        });
+    }
+
+    /// <summary>
+    /// Listed under Configuration - Widgets so the order-page row can be switched on by hand if an upgrade did not.
+    /// </summary>
+    public bool HideInWidgetList => false;
+
+    /// <inheritdoc />
+    public Task<IList<string>> GetWidgetZonesAsync() =>
+        Task.FromResult<IList<string>>(new List<string> { AdminWidgetZones.OrderDetailsBlock });
+
+    /// <inheritdoc />
+    public Type GetWidgetViewComponent(string widgetZone) => typeof(NmiOrderKountScoreViewComponent);
+
     /// <inheritdoc />
     public override async Task UninstallAsync()
     {
+        var widgetSettings = await _settingService.LoadSettingAsync<WidgetSettings>();
+        if (widgetSettings.ActiveWidgetSystemNames.Remove(NmiDefaults.SystemName))
+            await _settingService.SaveSettingAsync(widgetSettings);
+
         if (_paymentSettings.ActivePaymentMethodSystemNames.Remove(NmiDefaults.SystemName))
             await _settingService.SaveSettingAsync(_paymentSettings);
 

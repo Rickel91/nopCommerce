@@ -82,6 +82,14 @@ public class NmiPaymentProcessingTests
         Assert.Equal("safe", NmiResponseCodes.DescribeKountBand(saleScore));
         Assert.Equal("Kount score: 89.0 (safe)", Nop.Plugin.Payments.Nmi.Infrastructure.NmiOrderPlacedEventConsumer.BuildKountNote(saleScore));
 
+        // Admin order page row: placed below the Store row, values HTML-encoded.
+        Assert.Equal("89.0 (safe)", Nop.Plugin.Payments.Nmi.Components.NmiOrderKountScoreViewComponent.FormatScore(saleScore));
+        var row = Nop.Plugin.Payments.Nmi.Components.NmiOrderKountScoreViewComponent.BuildHtml("Kount score", "hint \"x\"", "<b>89.0</b>");
+        Assert.Contains("label[for=\"StoreName\"]", row);
+        Assert.Contains("&lt;b&gt;89.0&lt;/b&gt;", row);
+        Assert.DoesNotContain("<b>89.0</b>", row);
+        Assert.DoesNotContain("hint \"x\"", row);
+
         // Authorize-only: the diagnostic is on the authorization result instead.
         var auth = NmiPaymentResultMapper.Map(new(scored, null, 200), NmiTransactionMode.Authorize, Messages);
         var authorizedOrder = new Nop.Core.Domain.Orders.Order { AuthorizationTransactionResult = auth.AuthorizationTransactionResult };
